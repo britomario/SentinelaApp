@@ -50,7 +50,7 @@ export async function spendTokens(amount: number): Promise<{ok: boolean; balance
 export async function unlockAppWithTokens(
   appId: string,
   tokensToSpend: number,
-): Promise<{ok: boolean; balance: number; minutesGranted: number}> {
+): Promise<{ok: boolean; balance: number; minutesGranted: number; expiresAt?: number}> {
   const {ok, balance} = await spendTokens(tokensToSpend);
   if (!ok) return {ok: false, balance, minutesGranted: 0};
 
@@ -62,7 +62,7 @@ export async function unlockAppWithTokens(
   next.push({appId, minutesGranted, expiresAt});
   await AsyncStorage.setItem(UNLOCKS_KEY, JSON.stringify(next));
 
-  return {ok: true, balance, minutesGranted};
+  return {ok: true, balance, minutesGranted, expiresAt};
 }
 
 export async function getAppUnlocks(): Promise<AppUnlock[]> {

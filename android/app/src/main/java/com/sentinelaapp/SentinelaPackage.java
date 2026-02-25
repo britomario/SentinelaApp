@@ -21,6 +21,7 @@ public class SentinelaPackage implements ReactPackage {
         modules.add(new VpnModule(reactContext));
         modules.add(new AppBlockModule(reactContext));
         modules.add(new SecurityModule(reactContext));
+        modules.add(new DisplayWellnessModule(reactContext));
         return modules;
     }
 }

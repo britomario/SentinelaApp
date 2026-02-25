@@ -1,10 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ONBOARDING_DONE_KEY = 'sentinela.onboarding.done';
+const CAROUSEL_DONE_KEY = 'sentinela.onboarding.carousel_done';
 const LINKED_PROVIDER_KEY = 'sentinela.onboarding.linkedProvider';
 const TOUR_PREFIX = 'sentinela.tour.';
 
 export type LinkedProvider = 'google' | 'apple' | 'manual';
+
+export async function isCarouselCompleted(): Promise<boolean> {
+  const value = await AsyncStorage.getItem(CAROUSEL_DONE_KEY);
+  return value === '1';
+}
+
+export async function markCarouselCompleted(): Promise<void> {
+  await AsyncStorage.setItem(CAROUSEL_DONE_KEY, '1');
+}
 
 export async function isOnboardingDone(): Promise<boolean> {
   const value = await AsyncStorage.getItem(ONBOARDING_DONE_KEY);

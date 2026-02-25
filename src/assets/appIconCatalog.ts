@@ -109,6 +109,27 @@ export function getAppIcon(name: string): AppIconEntry | undefined {
   );
 }
 
+export function getAppIconByPackageName(packageName: string): AppIconEntry | undefined {
+  return APP_CATALOG.find(e => e.packageName === packageName);
+}
+
+/** Cria AppIconEntry para app arbitrário (instalado no dispositivo) */
+export function toAppIconEntry(packageName: string, label: string, iconUri?: string): AppIconEntry {
+  const known = getAppIconByPackageName(packageName) ?? getAppIcon(label);
+  const id = packageName.replace(/\./g, '_');
+  const base = known ?? {
+    id,
+    name: label,
+    iconUrl: `https://www.google.com/s2/favicons?domain=${packageName}&sz=128`,
+    fallback: getAppIconFallback(label),
+    packageName,
+  };
+  if (iconUri) {
+    return { ...base, iconUrl: iconUri };
+  }
+  return base;
+}
+
 export function getAppIconUrl(name: string): string | null {
   const entry = getAppIcon(name);
   return entry?.iconUrl ?? null;

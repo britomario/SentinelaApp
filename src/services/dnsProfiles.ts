@@ -15,6 +15,18 @@ export type DnsProfile = {
 
 export const DNS_PROFILES: DnsProfile[] = [
   {
+    id: 'nextdns-family',
+    name: 'NextDNS Family',
+    description:
+      'Perfil recomendado com bloqueio de adulto, apostas, malware e risco.',
+    provider: 'nextdns',
+    profileId: 'NEXTDNS_PROFILE',
+    policyTags: ['adult', 'gambling', 'malware', 'suspicious'],
+    dotHost: 'NEXTDNS_PROFILE.dns.nextdns.io',
+    dohUrl: 'https://dns.nextdns.io/NEXTDNS_PROFILE',
+    fallbackDnsIp: '45.90.28.0',
+  },
+  {
     id: 'adguard-family',
     name: 'AdGuard Family',
     description: 'Filtro familiar com bloqueio de conteúdo adulto e anúncios.',

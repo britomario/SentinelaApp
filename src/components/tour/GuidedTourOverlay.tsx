@@ -1,9 +1,23 @@
 import React from 'react';
-import {Modal, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {
+  Dimensions,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 export type TourStep = {
   title: string;
   description: string;
+};
+
+export type TourAnchor = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 type GuidedTourOverlayProps = {
@@ -12,6 +26,7 @@ type GuidedTourOverlayProps = {
   stepIndex: number;
   onNext: () => void;
   onClose: () => void;
+  anchor?: TourAnchor | null;
 };
 
 export default function GuidedTourOverlay({
@@ -20,6 +35,7 @@ export default function GuidedTourOverlay({
   stepIndex,
   onNext,
   onClose,
+  anchor,
 }: GuidedTourOverlayProps): React.JSX.Element {
   const step = steps[stepIndex];
   if (!step) {
@@ -27,11 +43,56 @@ export default function GuidedTourOverlay({
   }
 
   const isLastStep = stepIndex >= steps.length - 1;
+  const {width: screenWidth, height: screenHeight} = Dimensions.get('window');
+  const cardWidth = Math.min(screenWidth - 32, 340);
+  const cardHeightEstimate = 220;
+
+  const fallbackTop = Math.max(16, screenHeight - cardHeightEstimate - 24);
+  let cardTop = fallbackTop;
+  let cardLeft = (screenWidth - cardWidth) / 2;
+
+  if (anchor) {
+    const spaceAbove = anchor.y - 16;
+    const spaceBelow = screenHeight - (anchor.y + anchor.height) - 16;
+    const shouldPlaceAbove =
+      spaceAbove > cardHeightEstimate && spaceAbove > spaceBelow;
+
+    cardTop = shouldPlaceAbove
+      ? Math.max(16, anchor.y - cardHeightEstimate - 12)
+      : Math.min(
+          screenHeight - cardHeightEstimate - 16,
+          anchor.y + anchor.height + 12,
+        );
+
+    const centeredLeft = anchor.x + anchor.width / 2 - cardWidth / 2;
+    cardLeft = Math.min(Math.max(16, centeredLeft), screenWidth - cardWidth - 16);
+  }
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.card}>
+        {anchor ? (
+          <View
+            style={[
+              styles.anchorHighlight,
+              {
+                left: Math.max(8, anchor.x - 6),
+                top: Math.max(8, anchor.y - 6),
+                width: anchor.width + 12,
+                height: anchor.height + 12,
+              },
+            ]}
+          />
+        ) : null}
+        <View
+          style={[
+            styles.card,
+            {
+              width: cardWidth,
+              top: cardTop,
+              left: cardLeft,
+            },
+          ]}>
           <Text style={styles.kicker}>Tour guiado</Text>
           <Text style={styles.title}>{step.title}</Text>
           <Text style={styles.description}>{step.description}</Text>
@@ -56,10 +117,17 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.72)',
-    justifyContent: 'flex-end',
-    padding: 20,
+    padding: 16,
+  },
+  anchorHighlight: {
+    position: 'absolute',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
   },
   card: {
+    position: 'absolute',
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
     padding: 20,

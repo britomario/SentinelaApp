@@ -9,6 +9,8 @@ type ResponseLike = {
   json: (body: any) => void;
 };
 
+import {getSupabaseServerClient} from '../_supabaseServer';
+
 export default async function handler(
   req: RequestLike,
   res: ResponseLike,
@@ -32,6 +34,20 @@ export default async function handler(
   const status = event.type?.toLowerCase?.().includes('cancel')
     ? 'inactive'
     : 'active';
+
+  const supabase = getSupabaseServerClient();
+  if (supabase && appUserId) {
+    await supabase.from('family_premium_state').upsert(
+      {
+        parent_id: appUserId,
+        active: status === 'active',
+        source: 'revenuecat',
+        entitlement_id: entitlement,
+        updated_at: new Date().toISOString(),
+      },
+      {onConflict: 'parent_id'},
+    );
+  }
 
   res.status(200).json({
     ok: true,

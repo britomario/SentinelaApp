@@ -8,7 +8,8 @@ const DEFER_DAYS = 7;
 export type ReviewSignal =
   | 'climate_green_visible'
   | 'dns_private_configured'
-  | 'pairing_success';
+  | 'pairing_success'
+  | 'token_unlock_success';
 
 type ReviewState = {
   rated: boolean;
@@ -88,6 +89,7 @@ export async function getReviewEligibility(
   const hasSuccessMoment =
     !!state.signals.climate_green_visible ||
     !!state.signals.dns_private_configured ||
+    !!state.signals.token_unlock_success ||
     hasPairingSuccess;
 
   if (activeDaysCount < 3 && !hasPairingSuccess) {

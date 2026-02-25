@@ -1,44 +1,37 @@
 import React, {useEffect, useState} from 'react';
 import {
+  useFocusEffect,
+} from '@react-navigation/native';
+
+import {
   ScrollView,
   StatusBar,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
+  Modal,
 } from 'react-native';
 
 import Skeleton from '../../components/feedback/Skeleton';
 import AppIcon from '../../components/apps/AppIcon';
 import GuidedTourOverlay from '../../components/tour/GuidedTourOverlay';
+import type {TourAnchor} from '../../components/tour/GuidedTourOverlay';
 import {useToast} from '../../components/feedback/ToastProvider';
 import {hasSeenTour, markTourSeen} from '../../services/onboardingState';
+import {useParentCreditsApps} from '../../hooks/useParentCreditsApps';
 import {BorderRadius, Colors, Shadows, Spacing} from '../../theme/colors';
-
-const APPS_BY_CATEGORY = [
-  {
-    category: 'Jogos',
-    apps: [
-      {id: '1', name: 'Roblox', limit: 60},
-      {id: '2', name: 'Minecraft', limit: 45},
-    ],
-  },
-  {
-    category: 'Social',
-    apps: [
-      {id: '3', name: 'TikTok', limit: 30},
-      {id: '4', name: 'Instagram', limit: 45},
-    ],
-  },
-];
 
 const APPS_TOUR = [
   {
+    anchorKey: 'limits',
     title: 'Limites por categoria',
     description: 'Defina regras de tempo para jogos e redes sociais rapidamente.',
   },
   {
+    anchorKey: 'whitelist',
     title: 'Contatos permitidos',
     description: 'Garanta comunicacao apenas com contatos da familia.',
   },
@@ -46,15 +39,16 @@ const APPS_TOUR = [
 
 export default function AppsControlScreen(): React.JSX.Element {
   const {showToast} = useToast();
-  const [isLoading, setIsLoading] = useState(true);
+  const {apps: creditsApps, loading: creditsLoading, refresh, updateLimit} = useParentCreditsApps();
   const [whitelistOnly, setWhitelistOnly] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
   const [tourStep, setTourStep] = useState(0);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 900);
-    return () => clearTimeout(timer);
-  }, []);
+  const [tourAnchors, setTourAnchors] = useState<Record<string, TourAnchor>>({});
+  const [editApp, setEditApp] = useState<{packageName: string; displayName: string; dailyLimitMinutes?: number} | null>(null);
+  const [minutesInput, setMinutesInput] = useState('');
+  const [savingLimit, setSavingLimit] = useState(false);
+  const limitsRef = React.useRef<View>(null);
+  const whitelistRef = React.useRef<View>(null);
 
   useEffect(() => {
     hasSeenTour('apps-control').then(seen => {
@@ -64,10 +58,72 @@ export default function AppsControlScreen(): React.JSX.Element {
     });
   }, []);
 
+  const measureTourAnchors = () => {
+    const refs: Array<{key: string; ref: React.RefObject<View>}> = [
+      {key: 'limits', ref: limitsRef},
+      {key: 'whitelist', ref: whitelistRef},
+    ];
+    refs.forEach(item => {
+      item.ref.current?.measureInWindow((x, y, width, height) => {
+        if (width <= 0 || height <= 0) {
+          return;
+        }
+        setTourAnchors(prev => ({
+          ...prev,
+          [item.key]: {x, y, width, height},
+        }));
+      });
+    });
+  };
+
+  useEffect(() => {
+    if (!tourVisible) {
+      return;
+    }
+    const timer = setTimeout(measureTourAnchors, 120);
+    return () => clearTimeout(timer);
+  }, [tourVisible, tourStep]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refresh().catch(() => undefined);
+      return () => undefined;
+    }, [refresh]),
+  );
+
   const closeTour = () => {
     markTourSeen('apps-control').catch(() => undefined);
     setTourVisible(false);
     setTourStep(0);
+  };
+
+  const handleAppPress = (app: { packageName: string; displayName: string; dailyLimitMinutes?: number }) => {
+    setEditApp(app);
+    setMinutesInput(String(app.dailyLimitMinutes ?? 0));
+  };
+
+  const saveLimit = async () => {
+    if (!editApp) {
+      return;
+    }
+    const minutes = Math.max(0, parseInt(minutesInput, 10) || 0);
+    setSavingLimit(true);
+    try {
+      await updateLimit(editApp.packageName, minutes);
+      showToast({
+        kind: 'success',
+        title: 'Limite atualizado',
+        message: `${editApp.displayName}: ${minutes} min/dia`,
+      });
+      setEditApp(null);
+    } catch {
+      showToast({
+        kind: 'error',
+        title: 'Falha ao atualizar limite',
+      });
+    } finally {
+      setSavingLimit(false);
+    }
   };
 
   return (
@@ -77,6 +133,7 @@ export default function AppsControlScreen(): React.JSX.Element {
         visible={tourVisible}
         steps={APPS_TOUR}
         stepIndex={tourStep}
+        anchor={tourAnchors[APPS_TOUR[tourStep]?.anchorKey]}
         onClose={closeTour}
         onNext={() => {
           if (tourStep >= APPS_TOUR.length - 1) {
@@ -89,47 +146,51 @@ export default function AppsControlScreen(): React.JSX.Element {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Controle de Apps</Text>
-          <TouchableOpacity onPress={() => setTourVisible(true)}>
+          <TouchableOpacity
+            onPress={() => {
+              setTourStep(0);
+              setTourVisible(true);
+            }}>
             <Text style={styles.help}>Ajuda</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.sectionTitle}>Limites por app</Text>
-        {isLoading ? (
+        <View ref={limitsRef}>
+          <Text style={styles.sectionTitle}>Limites por app</Text>
+          <Text style={styles.sectionDesc}>
+            Apps adicionados pela criança na tela de créditos aparecem aqui.
+          </Text>
+        </View>
+        {creditsLoading ? (
           <View style={styles.card}>
             <Skeleton width="55%" />
             <Skeleton width="100%" style={{marginTop: 8}} />
             <Skeleton width="82%" style={{marginTop: 8}} />
           </View>
+        ) : creditsApps.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyText}>
+              Nenhum app adicionado ainda. Peça à criança para adicionar apps na tela "Modo Criança".
+            </Text>
+          </View>
         ) : (
-          APPS_BY_CATEGORY.map(cat => (
-            <View key={cat.category} style={styles.section}>
-              <Text style={styles.categoryLabel}>{cat.category}</Text>
-              <View style={styles.card}>
-                {cat.apps.map(app => (
-                  <TouchableOpacity
-                    key={app.id}
-                    style={styles.appRow}
-                    onPress={() =>
-                      showToast({
-                        kind: 'info',
-                        title: `${app.name}: ${app.limit} min/dia`,
-                        message: 'Edicao detalhada em breve.',
-                      })
-                    }>
-                    <AppIcon name={app.name} size={24} style={{marginRight: Spacing.sm}} />
-                    <View style={{flex: 1}}>
-                      <Text style={styles.appName}>{app.name}</Text>
-                      <Text style={styles.appLimit}>{app.limit} min/dia</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          ))
+          <View style={styles.card}>
+            {creditsApps.map(app => (
+              <TouchableOpacity
+                key={app.packageName}
+                style={styles.appRow}
+                onPress={() => handleAppPress(app)}>
+                <AppIcon name={app.displayName} size={24} iconUri={app.iconUri} style={{marginRight: Spacing.sm}} />
+                <View style={{flex: 1}}>
+                  <Text style={styles.appName}>{app.displayName}</Text>
+                  <Text style={styles.appLimit}>{app.dailyLimitMinutes ?? 60} min/dia</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
 
-        <View style={styles.section}>
+        <View style={styles.section} ref={whitelistRef}>
           <Text style={styles.sectionTitle}>Navegacao segura</Text>
           <View style={styles.card}>
             <View style={styles.toggleRow}>
@@ -150,6 +211,39 @@ export default function AppsControlScreen(): React.JSX.Element {
           </View>
         </View>
       </ScrollView>
+
+      <Modal visible={!!editApp} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Editar limite diário</Text>
+            <Text style={styles.modalSubtitle}>{editApp?.displayName}</Text>
+            <TextInput
+              style={styles.modalInput}
+              keyboardType="number-pad"
+              value={minutesInput}
+              onChangeText={setMinutesInput}
+              placeholder="Minutos por dia"
+              placeholderTextColor={Colors.textMuted}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalCancel]}
+                onPress={() => setEditApp(null)}
+                disabled={savingLimit}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalSave]}
+                onPress={saveLimit}
+                disabled={savingLimit}>
+                <Text style={styles.modalSaveText}>
+                  {savingLimit ? 'Salvando...' : 'Salvar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -162,7 +256,14 @@ const styles = StyleSheet.create({
   help: {color: Colors.primary, fontWeight: '700'},
   section: {marginTop: Spacing.md},
   sectionTitle: {fontSize: 18, fontWeight: '700', color: Colors.textPrimary, marginTop: Spacing.md},
-  categoryLabel: {fontSize: 14, color: Colors.textSecondary, marginBottom: 8, marginLeft: 4},
+  sectionDesc: {fontSize: 14, color: Colors.textSecondary, marginTop: 4, marginBottom: Spacing.md},
+  emptyCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    ...Shadows.low,
+  },
+  emptyText: {fontSize: 15, color: Colors.textSecondary, textAlign: 'center'},
   card: {
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.xl,
@@ -181,4 +282,64 @@ const styles = StyleSheet.create({
   appLimit: {fontSize: 13, color: Colors.textSecondary, marginTop: 2},
   toggleRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'},
   toggleLabel: {fontSize: 15, color: Colors.textPrimary, fontWeight: '600'},
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    ...Shadows.low,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.md,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    color: Colors.textPrimary,
+    fontSize: 16,
+    marginBottom: Spacing.md,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  modalBtn: {
+    flex: 1,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
+  modalCancel: {
+    backgroundColor: Colors.border,
+  },
+  modalSave: {
+    backgroundColor: Colors.primary,
+  },
+  modalCancelText: {
+    color: Colors.textSecondary,
+    fontWeight: '600',
+  },
+  modalSaveText: {
+    color: Colors.white,
+    fontWeight: '700',
+  },
 });

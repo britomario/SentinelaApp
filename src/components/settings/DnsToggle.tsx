@@ -1,10 +1,12 @@
 /**
  * Configuração DNS - Child-friendly Professional
+ * Ícones escudo mágico / filtro proteção
  */
 
 import React from 'react';
 import {
   Linking,
+  NativeModules,
   StyleSheet,
   Switch,
   Text,
@@ -12,12 +14,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {NativeModules} from 'react-native';
+import {Shield, ShieldCheck} from 'lucide-react-native';
 
 import {DNS_PROFILES, type DnsMode} from '../../services/dnsProfiles';
 import {Colors, Spacing, BorderRadius} from '../../theme/colors';
 
-const {AppBlockModule, VpnModule} = NativeModules as any;
+const {AppBlockModule} = NativeModules as any;
 
 type DnsToggleProps = {
   dnsMode: DnsMode;
@@ -31,6 +33,7 @@ type DnsToggleProps = {
   customDohUrl: string;
   onCustomDohUrlChange: (v: string) => void;
   onApply: () => void;
+  dnsProtectionApplied?: boolean;
 };
 
 export default function DnsToggle({
@@ -45,16 +48,25 @@ export default function DnsToggle({
   customDohUrl,
   onCustomDohUrlChange,
   onApply,
+  dnsProtectionApplied = false,
 }: DnsToggleProps): React.JSX.Element {
   const openNetworkSettings = () =>
     AppBlockModule?.openNetworkSettings?.()?.catch?.(() => Linking.openSettings());
 
   return (
     <View style={styles.section}>
-      <Text style={styles.para}>
-        Modo leve usa DNS Privado nativo (DoT). Modo avançado aplica fallback
-        local.
-      </Text>
+      {dnsProtectionApplied && (
+        <View style={styles.protectionActive}>
+          <ShieldCheck size={20} color={Colors.mint} style={styles.protectionIcon} />
+          <Text style={styles.protectionText}>Proteção Ativa no Dispositivo</Text>
+        </View>
+      )}
+      <View style={styles.dnsIntro}>
+        <Shield size={24} color={Colors.primary} style={styles.dnsIntroIcon} />
+        <Text style={styles.para}>
+          Modo leve usa DNS Privado nativo (DoT). Recomendado: perfil NextDNS Family com validação ativa de bloqueio.
+        </Text>
+      </View>
       <View style={styles.row}>
         <Text style={styles.label}>Modo leve (DoT nativo)</Text>
         <Switch
@@ -76,7 +88,14 @@ export default function DnsToggle({
             onSelectProfile(profile.id);
             onUseCustomChange(false);
           }}>
-          <Text style={styles.cardTitle}>{profile.name}</Text>
+          <View style={styles.cardHeader}>
+            <ShieldCheck
+              size={20}
+              color={selectedProfileId === profile.id ? Colors.primary : Colors.textSecondary}
+              style={styles.cardIcon}
+            />
+            <Text style={styles.cardTitle}>{profile.name}</Text>
+          </View>
           <Text style={styles.cardDesc}>{profile.description}</Text>
           <Text style={styles.cardHint}>DoT: {profile.dotHost}</Text>
         </TouchableOpacity>
@@ -119,7 +138,24 @@ export default function DnsToggle({
 
 const styles = StyleSheet.create({
   section: {},
+  protectionActive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.mintLight,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.lg,
+  },
+  protectionIcon: {marginRight: Spacing.sm},
+  protectionText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  dnsIntro: {flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.sm},
+  dnsIntroIcon: {marginRight: Spacing.sm, marginTop: 2},
   para: {
+    flex: 1,
     fontSize: 15,
     color: Colors.textSecondary,
     marginBottom: Spacing.lg,
@@ -157,16 +193,24 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: Colors.surface,
-    borderRadius: 20,
+    borderRadius: BorderRadius.xl,
     padding: Spacing.lg,
     marginBottom: Spacing.sm,
     borderWidth: 1,
     borderColor: Colors.border,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   cardSelected: {
     borderWidth: 2,
     borderColor: Colors.primary,
+    backgroundColor: Colors.mintLight,
   },
+  cardHeader: {flexDirection: 'row', alignItems: 'center', marginBottom: 4},
+  cardIcon: {marginRight: Spacing.sm},
   cardTitle: {
     fontSize: 17,
     fontWeight: '700',

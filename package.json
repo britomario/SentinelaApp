@@ -3,8 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
+    "check:env": "node scripts/check-env.js",
+    "check:env:strict": "node scripts/check-env.js --strict",
     "start:reset": "react-native start --reset-cache",
     "android": "react-native run-android",
+    "android:emulator-fix": "./scripts/fix-android-emulator.sh",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
@@ -36,7 +39,8 @@
     "react-native-safe-area-context": "^5.6.2",
     "react-native-screens": "4.10.0",
     "react-native-svg": "^15.15.3",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "suncalc": "^1.9.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

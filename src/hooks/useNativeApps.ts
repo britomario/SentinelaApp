@@ -6,6 +6,7 @@ const {AppBlockModule} = NativeModules;
 export type AppInfo = {
   packageName: string;
   label: string;
+  iconUri?: string;
 };
 
 export function useNativeApps(): {
@@ -25,9 +26,10 @@ export function useNativeApps(): {
       if (Platform.OS === 'android' && AppBlockModule?.getInstalledApps) {
         const raw = await AppBlockModule.getInstalledApps();
         const list: AppInfo[] = Array.isArray(raw)
-          ? raw.map((r: {packageName?: string; label?: string}) => ({
+          ? raw.map((r: {packageName?: string; label?: string; iconUri?: string}) => ({
               packageName: r.packageName ?? '',
               label: r.label ?? r.packageName ?? '',
+              iconUri: r.iconUri ?? undefined,
             }))
           : [];
         list.sort((a, b) => a.label.localeCompare(b.label, undefined, {sensitivity: 'base'}));

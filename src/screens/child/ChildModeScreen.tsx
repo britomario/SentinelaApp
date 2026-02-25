@@ -3,7 +3,7 @@
  * UI profissional com gamificação, tokens e grade de apps permitidos.
  */
 
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -14,18 +14,21 @@ import {
   Pressable,
   StatusBar,
   NativeModules,
+  TextInput,
+  FlatList,
 } from 'react-native';
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import LinearGradient from 'react-native-linear-gradient';
 import {
   getLastLocationTimestamp,
+  getLastLocationSnapshot,
   startBackgroundLocationTracking,
   stopBackgroundLocationTracking,
 } from '../../services/location/backgroundLocationService';
 import {getChildPairingConfig} from '../../services/pairingService';
-import {
-  getCatalogForChildMode,
-  type AppIconEntry,
-} from '../../assets/appIconCatalog';
+import {getCurrentChildId} from '../../services/currentChildService';
+import type {AppIconEntry} from '../../assets/appIconCatalog';
 import {
   getTokens,
   getAppUnlocks,
@@ -33,24 +36,38 @@ import {
   markTaskDone,
   getTasksDone,
 } from '../../services/childTokenService';
+import {useChildCreditsApps} from '../../hooks/useChildCreditsApps';
+import {useChildTasks} from '../../hooks/useChildTasks';
+import {isRestModeActive, setRestModeActive} from '../../services/restModeService';
 
 import AppGrid from '../../components/child/AppGrid';
+import AppIcon from '../../components/apps/AppIcon';
 import ProtectionLevelBadge from '../../components/child/ProtectionLevelBadge';
 import {useToast} from '../../components/feedback/ToastProvider';
+import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
+import {RewardLottieOverlay} from '../../components/feedback/RewardLottieOverlay';
 import {Colors, Spacing, BorderRadius, Shadows} from '../../theme/colors';
+import {sendGuardianAlert} from '../../services/notifications/oneSignalService';
 
 const {AppBlockModule} = NativeModules as any;
 
-const TASKS = [
-  {id: '1', title: 'Arrume o quarto', reward: 50},
-  {id: '2', title: 'Leia por 20min', reward: 100},
-  {id: '3', title: 'Pratique exercício', reward: 75},
-];
 const TOKENS_PER_30MIN = 100;
 
+type RootStackParamList = { RestMode: undefined };
 export default function ChildModeScreen(): React.JSX.Element {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'RestMode'>>();
   const {showToast} = useToast();
+  const {recordReviewSignal} = useReviewPrompt();
+  const {
+    creditsApps,
+    installedApps,
+    loading: creditsLoading,
+    addApp,
+    refresh: refreshCredits,
+  } = useChildCreditsApps();
+  const { tasks, loading: tasksLoading, refresh: refreshTasks } = useChildTasks();
   const [sosHold, setSosHold] = useState(false);
+  const [sosCountdown, setSosCountdown] = useState(3);
   const [showDistanceWarning, setShowDistanceWarning] = useState(false);
   const [locationStatus, setLocationStatus] = useState('Inicializando...');
   const [isPaired, setIsPaired] = useState(false);
@@ -58,14 +75,31 @@ export default function ChildModeScreen(): React.JSX.Element {
   const [unlocks, setUnlocks] = useState<Awaited<ReturnType<typeof getAppUnlocks>>>([]);
   const [tasksDone, setTasksDone] = useState<Set<string>>(new Set());
   const [blockedApps, setBlockedApps] = useState<Set<string>>(new Set());
-  const [permittedApps, setPermittedApps] = useState<AppIconEntry[]>([]);
   const [unlockModal, setUnlockModal] = useState<AppIconEntry | null>(null);
+  const [addAppModalVisible, setAddAppModalVisible] = useState(false);
+  const [addAppSearch, setAddAppSearch] = useState('');
+  const [showRewardLottie, setShowRewardLottie] = useState(false);
+  const [restModeActive, setRestModeActiveState] = useState(false);
+  const [childId, setChildId] = useState<string>('local-child');
+  const sosTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sosTriggeredRef = useRef(false);
+
+  const creditsIds = new Set(creditsApps.map(a => a.packageName));
+  const permittedApps = creditsApps.filter(
+    app => !app.packageName || !blockedApps.has(app.packageName),
+  );
+  const availableToAdd = installedApps.filter(
+    a => !creditsIds.has(a.packageName) &&
+      (!addAppSearch.trim() ||
+        a.label.toLowerCase().includes(addAppSearch.toLowerCase())),
+  );
 
   const refreshData = useCallback(async () => {
-    const [t, u, done, blocked] = await Promise.all([
+    const [t, u, done, active, blocked] = await Promise.all([
       getTokens(),
       getAppUnlocks(),
       getTasksDone(),
+      isRestModeActive(),
       AppBlockModule?.getBlockedApps?.()?.then(
         (arr: string[]) => new Set(arr ?? []),
       ) ?? Promise.resolve(new Set<string>()),
@@ -73,26 +107,28 @@ export default function ChildModeScreen(): React.JSX.Element {
     setTokens(t);
     setUnlocks(u);
     setTasksDone(done);
+    setRestModeActiveState(active);
     setBlockedApps(blocked);
-
-    const catalog = getCatalogForChildMode();
-    const permitted = catalog.filter(
-      app =>
-        !app.packageName || !blocked.has(app.packageName),
-    );
-    setPermittedApps(permitted);
-  }, []);
+    refreshCredits();
+    refreshTasks();
+  }, [refreshCredits, refreshTasks]);
 
   useEffect(() => {
     refreshData();
   }, [refreshData]);
 
   useEffect(() => {
+    getCurrentChildId()
+      .then(id => setChildId(id))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     getChildPairingConfig().then(config => setIsPaired(!!config));
   }, []);
 
   useEffect(() => {
-    startBackgroundLocationTracking('mock-child-id')
+    startBackgroundLocationTracking(childId)
       .then(ok => {
         if (!ok) {
           setLocationStatus('Permissão de localização negada.');
@@ -105,7 +141,9 @@ export default function ChildModeScreen(): React.JSX.Element {
     const id = setInterval(() => {
       getLastLocationTimestamp()
         .then(ts => {
-          if (!ts) return;
+          if (!ts) {
+            return;
+          }
           const deltaMinutes = Math.floor((Date.now() - ts) / 60000);
           if (deltaMinutes >= 10) {
             setLocationStatus('Sem atualização recente. Verifique a conexão.');
@@ -120,13 +158,16 @@ export default function ChildModeScreen(): React.JSX.Element {
       clearInterval(id);
       stopBackgroundLocationTracking();
     };
-  }, []);
+  }, [childId]);
 
   const handleTaskPress = async (taskId: string, reward: number) => {
-    if (tasksDone.has(taskId)) return;
+    if (tasksDone.has(taskId)) {
+      return;
+    }
     const newBalance = await markTaskDone(taskId, reward);
     setTokens(newBalance);
     setTasksDone(prev => new Set([...prev, taskId]));
+    setShowRewardLottie(true);
     showToast({
       kind: 'success',
       title: `+${reward} tokens!`,
@@ -136,8 +177,17 @@ export default function ChildModeScreen(): React.JSX.Element {
   };
 
   const handleUnlockRequest = (appId: string) => {
-    const app = permittedApps.find(a => a.id === appId);
-    if (app) setUnlockModal(app);
+    const app = permittedApps.find(a => a.id === appId || a.packageName === appId);
+    if (app) {
+      setUnlockModal(app);
+    }
+  };
+
+  const handleAddApp = async (packageName: string, label: string, iconUri?: string) => {
+    await addApp(packageName, label, iconUri);
+    setAddAppModalVisible(false);
+    setAddAppSearch('');
+    showToast({ kind: 'success', title: 'App adicionado', message: `${label} disponível para créditos.` });
   };
 
   const confirmUnlock = async () => {
@@ -146,10 +196,15 @@ export default function ChildModeScreen(): React.JSX.Element {
       setUnlockModal(null);
       return;
     }
-    const result = await unlockAppWithTokens(app.id, TOKENS_PER_30MIN);
+    const packageName = app.packageName ?? app.id;
+    const result = await unlockAppWithTokens(packageName, TOKENS_PER_30MIN);
     setUnlockModal(null);
     refreshData();
     if (result.ok) {
+      recordReviewSignal('token_unlock_success').catch(() => undefined);
+      if (result.expiresAt && AppBlockModule?.addTemporaryUnlock) {
+        AppBlockModule.addTemporaryUnlock(packageName, result.expiresAt).catch(() => undefined);
+      }
       showToast({
         kind: 'success',
         title: `${app.name} desbloqueado!`,
@@ -175,9 +230,78 @@ export default function ChildModeScreen(): React.JSX.Element {
   const protectionActive = locationStatus.includes('Conectado');
   const level = Math.min(5, Math.floor(tokens / 50) + 1);
 
+  const stopSosTimer = () => {
+    if (sosTimerRef.current) {
+      clearInterval(sosTimerRef.current);
+      sosTimerRef.current = null;
+    }
+  };
+
+  const triggerSos = async () => {
+    if (sosTriggeredRef.current) {
+      return;
+    }
+    sosTriggeredRef.current = true;
+    stopSosTimer();
+    setSosHold(false);
+    setSosCountdown(3);
+
+    const location = await getLastLocationSnapshot();
+    const locationMessage = location
+      ? `Localização: ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`
+      : 'Localização indisponível no momento.';
+
+    const ok = await sendGuardianAlert({
+      childId,
+      title: 'SOS da criança',
+      message: `Alerta de emergência acionado. ${locationMessage}`,
+    });
+
+    showToast(
+      ok
+        ? {kind: 'success', title: 'SOS enviado', message: 'O responsável foi notificado.'}
+        : {kind: 'error', title: 'Falha ao enviar SOS', message: 'Tente novamente em instantes.'},
+    );
+    setTimeout(() => {
+      sosTriggeredRef.current = false;
+    }, 1500);
+  };
+
+  const onSosPressIn = () => {
+    if (sosTriggeredRef.current) {
+      return;
+    }
+    setSosHold(true);
+    setSosCountdown(3);
+    stopSosTimer();
+    sosTimerRef.current = setInterval(() => {
+      setSosCountdown(prev => {
+        if (prev <= 1) {
+          triggerSos().catch(() => undefined);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const onSosPressOut = () => {
+    if (!sosTriggeredRef.current) {
+      stopSosTimer();
+      setSosHold(false);
+      setSosCountdown(3);
+    }
+  };
+
+  useEffect(() => () => stopSosTimer(), []);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" />
+      <RewardLottieOverlay
+        visible={showRewardLottie}
+        onFinish={() => setShowRewardLottie(false)}
+      />
 
       <LinearGradient
         colors={[Colors.childBgStart, Colors.childBgEnd]}
@@ -218,37 +342,90 @@ export default function ChildModeScreen(): React.JSX.Element {
 
           {/* Tarefas */}
           <Text style={styles.sectionTitle}>Tarefas</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.tasksScroll}>
-            {TASKS.map(item => (
-              <TouchableOpacity
-                key={item.id}
-                style={[
-                  styles.taskCard,
-                  tasksDone.has(item.id) && styles.taskCardDone,
-                ]}
-                onPress={() => handleTaskPress(item.id, item.reward)}
-                disabled={tasksDone.has(item.id)}
-                activeOpacity={0.8}>
-                <Text style={styles.taskTitle}>{item.title}</Text>
-                <Text style={styles.taskReward}>
-                  {tasksDone.has(item.id) ? '✓ Feito' : `+${item.reward} 🪙`}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          {tasksLoading ? (
+            <Text style={styles.loadingText}>Carregando tarefas...</Text>
+          ) : tasks.length === 0 ? (
+            <Text style={styles.emptyTasksText}>
+              Nenhuma tarefa. O responsável pode criar em Configurações → Tarefas.
+            </Text>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.tasksScroll}>
+              {tasks.map(item => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[
+                    styles.taskCard,
+                    tasksDone.has(item.id) && styles.taskCardDone,
+                  ]}
+                  onPress={() => handleTaskPress(item.id, item.rewardCoins)}
+                  disabled={tasksDone.has(item.id)}
+                  activeOpacity={0.8}>
+                  <Text style={styles.taskTitle}>{item.title}</Text>
+                  <Text style={styles.taskReward}>
+                    {tasksDone.has(item.id) ? '✓ Feito' : `+${item.rewardCoins} 🪙`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
 
           {/* Grade de Apps */}
-          <Text style={styles.sectionTitle}>Apps</Text>
-          <AppGrid
-            apps={permittedApps}
-            tokens={tokens}
-            unlocks={unlocks}
-            onUnlockRequest={handleUnlockRequest}
-            onAppPress={handleAppPress}
-          />
+          <View style={styles.appsSectionHeader}>
+            <Text style={styles.sectionTitle}>Apps</Text>
+            <TouchableOpacity
+              style={styles.addAppBtn}
+              onPress={() => setAddAppModalVisible(true)}>
+              <Text style={styles.addAppBtnText}>+ Adicionar</Text>
+            </TouchableOpacity>
+          </View>
+          {creditsLoading && <Text style={styles.loadingText}>Carregando...</Text>}
+          {!creditsLoading && permittedApps.length === 0 && (
+            <View style={styles.emptyAppsCard}>
+              <Text style={styles.emptyAppsText}>
+                Nenhum app adicionado. Toque em "Adicionar" para escolher apps que você pode desbloquear com tokens.
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyAppsBtn}
+                onPress={() => setAddAppModalVisible(true)}>
+                <Text style={styles.emptyAppsBtnText}>Adicionar app</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {!creditsLoading && permittedApps.length > 0 && (
+            <AppGrid
+              apps={permittedApps}
+              tokens={tokens}
+              unlocks={unlocks}
+              onUnlockRequest={handleUnlockRequest}
+              onAppPress={handleAppPress}
+            />
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.restModeBtn,
+              restModeActive ? styles.restModeBtnActive : styles.restModeBtnInactive,
+            ]}
+            onPress={async () => {
+              const next = !restModeActive;
+              await setRestModeActive(next);
+              setRestModeActiveState(next);
+              if (next) {
+                navigation.navigate('RestMode');
+              } else {
+                showToast({
+                  kind: 'success',
+                  title: 'Modo Descanso desativado',
+                });
+              }
+            }}>
+            <Text style={[styles.restModeBtnText, restModeActive ? styles.restModeBtnTextActive : null]}>
+              {restModeActive ? '☀️ Desativar Modo Descanso' : '🌙 Ativar Modo Descanso'}
+            </Text>
+          </TouchableOpacity>
 
           <View style={styles.statusCard}>
             <Text style={styles.statusTitle}>Sentinela ativo</Text>
@@ -264,10 +441,10 @@ export default function ChildModeScreen(): React.JSX.Element {
         {/* Botão SOS */}
         <Pressable
           style={[styles.sosBtn, sosHold && styles.sosBtnHolding]}
-          onPressIn={() => setSosHold(true)}
-          onPressOut={() => setSosHold(false)}>
+          onPressIn={onSosPressIn}
+          onPressOut={onSosPressOut}>
           <Text style={styles.sosText}>
-            {sosHold ? 'Solte para enviar' : 'Segure 3s'}
+            {sosHold ? `Segure ${sosCountdown}s` : 'Segure 3s'}
           </Text>
           <Text style={styles.sosLabel}>SOS</Text>
         </Pressable>
@@ -302,6 +479,51 @@ export default function ChildModeScreen(): React.JSX.Element {
                 </View>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Adicionar App */}
+      <Modal
+        visible={addAppModalVisible}
+        transparent
+        animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.addAppModal]}>
+            <Text style={styles.modalTitle}>Adicionar app</Text>
+            <TextInput
+              style={styles.addAppSearch}
+              placeholder="Buscar app..."
+              placeholderTextColor={Colors.textMuted}
+              value={addAppSearch}
+              onChangeText={setAddAppSearch}
+            />
+            <FlatList
+              data={availableToAdd}
+              keyExtractor={item => item.packageName}
+              style={styles.addAppList}
+              renderItem={({item}) => (
+                <TouchableOpacity
+                  style={styles.addAppRow}
+                  onPress={() => handleAddApp(item.packageName, item.label, item.iconUri)}>
+                  <AppIcon name={item.label} size={36} iconUri={item.iconUri} />
+                  <Text style={styles.addAppLabel} numberOfLines={1}>{item.label}</Text>
+                  <Text style={styles.addAppPlus}>+</Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <Text style={styles.emptyAddText}>
+                  {installedApps.length === 0
+                    ? 'Nenhum app instalado.'
+                    : 'Todos os apps já foram adicionados ou não há resultados.'}
+                </Text>
+              }
+            />
+            <TouchableOpacity
+              style={styles.modalBtnCancel}
+              onPress={() => { setAddAppModalVisible(false); setAddAppSearch(''); }}>
+              <Text style={styles.modalBtnCancelText}>Fechar</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -375,12 +597,13 @@ const styles = StyleSheet.create({
 
   tokenCard: {
     backgroundColor: Colors.childCard,
-    borderRadius: 28,
+    borderRadius: BorderRadius.xxl,
     padding: Spacing.lg,
     alignItems: 'center',
     marginBottom: Spacing.lg,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.9)',
+    ...Shadows.soft,
   },
   tokenLabel: {
     fontSize: 14,
@@ -399,15 +622,79 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginBottom: Spacing.md,
   },
+  appsSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  addAppBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  addAppBtnText: {
+    color: Colors.white,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  loadingText: { fontSize: 14, color: Colors.textSecondary, marginBottom: Spacing.md },
+  emptyAppsCard: {
+    backgroundColor: Colors.childCard,
+    borderRadius: BorderRadius.xxl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
+    ...Shadows.soft,
+  },
+  emptyAppsText: {
+    fontSize: 15,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+  },
+  emptyAppsBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.md,
+  },
+  emptyAppsBtnText: { color: Colors.white, fontWeight: '700' },
+  emptyTasksText: { fontSize: 14, color: Colors.textSecondary, marginBottom: Spacing.lg },
+  addAppModal: { maxHeight: '80%' },
+  addAppSearch: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    fontSize: 16,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  addAppList: { maxHeight: 280, marginBottom: Spacing.md },
+  addAppRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  addAppLabel: { flex: 1, fontSize: 16, color: Colors.textPrimary, marginLeft: Spacing.md },
+  addAppPlus: { fontSize: 24, color: Colors.primary, fontWeight: '700' },
+  emptyAddText: { color: Colors.textMuted, textAlign: 'center', padding: Spacing.lg },
   tasksScroll: {marginBottom: Spacing.lg},
   taskCard: {
     backgroundColor: Colors.childCard,
-    borderRadius: 20,
+    borderRadius: BorderRadius.pill,
     padding: Spacing.lg,
     width: 160,
     marginRight: Spacing.md,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.9)',
+    ...Shadows.soft,
   },
   taskCardDone: {
     opacity: 0.8,
@@ -426,6 +713,29 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
+  restModeBtn: {
+    marginTop: Spacing.lg,
+    borderRadius: 24,
+    padding: Spacing.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  restModeBtnActive: {
+    backgroundColor: 'rgba(120,53,15,0.9)',
+    borderColor: 'rgba(251,191,36,0.45)',
+  },
+  restModeBtnInactive: {
+    backgroundColor: 'rgba(26,26,46,0.9)',
+    borderColor: 'rgba(78,205,196,0.3)',
+  },
+  restModeBtnText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.white,
+  },
+  restModeBtnTextActive: {
+    color: '#FEF3C7',
+  },
   statusCard: {
     marginTop: Spacing.xl,
     backgroundColor: 'rgba(255,255,255,0.5)',

@@ -29,12 +29,14 @@ export const Colors = {
   textMuted: '#94A3B8',
   border: '#E2E8F0',
 
-  // Child-friendly (Espaço Seguro)
+  // Child-friendly (Espaço Seguro) - pastéis vibrantes
   childBgStart: '#E8F4F8',
   childBgEnd: '#F0E6FA',
-  childCard: 'rgba(255,255,255,0.7)',
+  childCard: 'rgba(255,255,255,0.85)',
   childMint: '#4ECDC4',
   childAmber: '#F59E0B',
+  childLavender: '#E9D5FF',
+  childPeach: '#FFE4E6',
 };
 
 export const Spacing = {
@@ -51,7 +53,15 @@ export const BorderRadius = {
   md: 16,
   lg: 20,
   xl: 24,
+  xxl: 28,
   full: 9999,
+  /** Pixel-perfect mínimo para UX infantojuvenil (Duolingo/Apple Arcade) */
+  pill: 20,
+};
+
+export const Glass = {
+  bg: 'rgba(255,255,255,0.75)',
+  border: 'rgba(255,255,255,0.9)',
 };
 
 export const Shadows = {
@@ -61,6 +71,14 @@ export const Shadows = {
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 2,
+  },
+  /** Sombras suaves para cards premium-childhood */
+  soft: {
+    shadowColor: '#94A3B8',
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 3,
   },
   medium: {
     shadowColor: '#000',

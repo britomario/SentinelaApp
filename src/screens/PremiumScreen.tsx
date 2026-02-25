@@ -7,20 +7,21 @@ import {
   activateAnnualLicense,
   getPremiumState,
   PremiumState,
-  PremiumStatus,
   startTrial,
 } from '../services/subscriptionService';
 import {openStore} from '../services/storeUrls';
 
 function formatStatus(state: PremiumState): string {
-  const statusLabels: Record<PremiumStatus, string> = {
-    trial_available: 'Trial disponível (7 dias grátis)',
-    trial_active: 'Trial ativo',
-    grace_period: 'Período de carência ativo',
-    expired: 'Assinatura expirada',
-    premium_active: 'Premium ativo',
-  };
-  return statusLabels[state.status] ?? state.status;
+  if (state.status === 'premium_active' || state.annualActive) {
+    return 'Ativo';
+  }
+  if (state.status === 'trial_active' && state.trialActive) {
+    return `Trial (${state.trialDaysLeft} dias restantes)`;
+  }
+  if (state.status === 'grace_period') {
+    return 'Ativo';
+  }
+  return 'Free';
 }
 
 const INITIAL_STATE: PremiumState = {
@@ -77,14 +78,7 @@ export default function PremiumScreen(): React.JSX.Element {
 
       <View style={styles.statusCard}>
         <Text style={styles.statusTitle}>Status atual</Text>
-        <Text style={styles.statusLine}>
-          {formatStatus(state)}
-        </Text>
-        {state.trialActive && (
-          <Text style={styles.statusLine}>
-            Trial: {state.trialDaysLeft} dias restantes
-          </Text>
-        )}
+        <Text style={styles.statusLine}>{formatStatus(state)}</Text>
       </View>
 
       <PricingCard
@@ -106,9 +100,7 @@ export default function PremiumScreen(): React.JSX.Element {
           </Text>
         ) : null}
         <TouchableOpacity onPress={() => openStore().catch(() => undefined)}>
-          <Text style={styles.trialStoreLink}>
-            Teste grátis na loja (Google Play / App Store)
-          </Text>
+          <Text style={styles.trialStoreLink}>teste gratis</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>

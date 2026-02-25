@@ -63,6 +63,17 @@ npm run ios
 npm run start:reset
 ```
 
+## Troubleshooting Android
+
+Se o emulador falhar com `StorageManager.getVolumes() null`:
+
+```bash
+npm run android:emulator-fix   # wipe + cold boot
+# Quando o emulador iniciar: npm run android
+```
+
+Detalhes: [docs/ANDROID_EMULATOR_FIX.md](docs/ANDROID_EMULATOR_FIX.md)
+
 ## Documentação
 
 - [DevOps e Segredos](docs/DEVOPS_SECRETS.md)

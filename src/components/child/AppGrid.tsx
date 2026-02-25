@@ -100,7 +100,7 @@ function AppGridItem({
       onPressOut={handlePressOut}
       onPress={handlePress}
       activeOpacity={1}>
-      <AppIcon name={app.name} size={56} />
+      <AppIcon name={app.name} size={56} iconUri={app.iconUrl} />
       <Text style={styles.label} numberOfLines={2}>
         {app.name}
       </Text>

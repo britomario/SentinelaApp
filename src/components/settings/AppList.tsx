@@ -4,7 +4,6 @@
 
 import React, {useMemo, useState} from 'react';
 import {
-  NativeModules,
   ScrollView,
   StyleSheet,
   Switch,
@@ -18,8 +17,6 @@ import AppIcon from '../apps/AppIcon';
 import Skeleton from '../feedback/Skeleton';
 import {useNativeApps} from '../../hooks/useNativeApps';
 import {BorderRadius, Colors, Spacing} from '../../theme/colors';
-
-const {AppBlockModule} = NativeModules as any;
 
 type AppListProps = Readonly<{
   blockedApps: Set<string>;
@@ -94,7 +91,7 @@ export default function AppList({
           const isBlocked = blockedApps.has(app.packageName);
           return (
             <View key={app.packageName} style={styles.appRow}>
-              <AppIcon name={app.label} size={40} style={styles.appIcon} />
+              <AppIcon name={app.label} size={40} iconUri={app.iconUri} style={styles.appIcon} />
               <View style={styles.appInfo}>
                 <Text style={[styles.appLabel, !blockingEnabled && styles.textMuted]}>
                   {app.label}

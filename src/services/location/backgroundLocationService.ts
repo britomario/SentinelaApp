@@ -5,6 +5,7 @@ import {publishChildLocation} from '../realtime/socketService';
 import {captureHandledError} from '../observability/sentry';
 
 const LAST_LOCATION_TS_KEY = 'sentinela.location.lastTimestamp';
+const LAST_LOCATION_PAYLOAD_KEY = 'sentinela.location.lastPayload';
 let watchId: number | null = null;
 
 export async function startBackgroundLocationTracking(
@@ -29,6 +30,7 @@ export async function startBackgroundLocationTracking(
         timestamp: Date.now(),
       };
       await AsyncStorage.setItem(LAST_LOCATION_TS_KEY, String(payload.timestamp));
+      await AsyncStorage.setItem(LAST_LOCATION_PAYLOAD_KEY, JSON.stringify(payload));
       await publishChildLocation(payload);
     },
     error => {
@@ -56,6 +58,41 @@ export function stopBackgroundLocationTracking(): void {
 export async function getLastLocationTimestamp(): Promise<number | null> {
   const value = await AsyncStorage.getItem(LAST_LOCATION_TS_KEY);
   return value ? Number(value) : null;
+}
+
+export async function getLastLocationSnapshot(): Promise<{
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  timestamp: number;
+} | null> {
+  try {
+    const raw = await AsyncStorage.getItem(LAST_LOCATION_PAYLOAD_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as {
+      latitude?: number;
+      longitude?: number;
+      accuracy?: number;
+      timestamp?: number;
+    };
+    if (
+      typeof parsed.latitude === 'number' &&
+      typeof parsed.longitude === 'number' &&
+      typeof parsed.timestamp === 'number'
+    ) {
+      return {
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        accuracy: parsed.accuracy,
+        timestamp: parsed.timestamp,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function ensureLocationPermission(): Promise<boolean> {

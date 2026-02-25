@@ -10,6 +10,8 @@ type ResponseLike = {
   json: (body: any) => void;
 };
 
+import {getSupabaseServerClient} from '../_supabaseServer';
+
 export default async function handler(
   req: RequestLike,
   res: ResponseLike,
@@ -25,16 +27,45 @@ export default async function handler(
     return;
   }
 
-  // Placeholder shape for app sync.
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    res.status(500).json({error: 'supabase_not_configured'});
+    return;
+  }
+
+  const {data: childrenRows} = await supabase
+    .from('family_children')
+    .select('child_id, alias, status')
+    .eq('parent_id', parentId)
+    .order('updated_at', {ascending: false});
+
+  const children = (childrenRows ?? []).map((row: any) => ({
+    childId: row.child_id,
+    alias: row.alias ?? null,
+    status: row.status ?? 'active',
+  }));
+
+  const {data: premiumRow} = await supabase
+    .from('family_premium_state')
+    .select('active, source')
+    .eq('parent_id', parentId)
+    .maybeSingle();
+
+  const {data: pairingRow} = await supabase
+    .from('family_pairing_state')
+    .select('latest_token_status')
+    .eq('parent_id', parentId)
+    .maybeSingle();
+
   res.status(200).json({
     parentId,
     premium: {
-      active: false,
-      source: 'revenuecat',
+      active: Boolean(premiumRow?.active),
+      source: premiumRow?.source ?? 'revenuecat',
     },
-    children: [],
+    children,
     pairing: {
-      latestTokenStatus: 'unknown',
+      latestTokenStatus: pairingRow?.latest_token_status ?? 'unknown',
     },
   });
 }

@@ -10,6 +10,7 @@ type EnvKey =
   | 'MAPS_API_KEY'
   | 'REALTIME_SOCKET_URL'
   | 'DNS_POLICY_API_BASE_URL'
+  | 'DNS_VALIDATION_BLOCKED_DOMAIN'
   | 'DNS_PROVIDER_DEFAULT'
   | 'FEATURE_REALTIME_LOCATION'
   | 'FEATURE_DOH_ENGINE'
@@ -23,7 +24,9 @@ function getEnvValue(key: EnvKey): string | undefined {
     }
     const result = NativeConfig.getConfig();
     const config = result?.config;
-    if (!config || typeof config !== 'object') return undefined;
+    if (!config || typeof config !== 'object') {
+      return undefined;
+    }
     const fromConfig = config[key];
     if (typeof fromConfig === 'string' && fromConfig.trim()) {
       return fromConfig.trim();

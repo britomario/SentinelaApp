@@ -14,15 +14,18 @@ type AppIconProps = {
   name: string;
   size?: number;
   style?: object;
+  /** URI priorizada sobre lookup por nome (ex: data:image/png;base64,...) */
+  iconUri?: string | null;
 };
 
 export default function AppIcon({
   name,
   size = 40,
   style,
+  iconUri,
 }: AppIconProps): React.JSX.Element {
   const [error, setError] = useState(false);
-  const url = getAppIconUrl(name);
+  const url = iconUri ?? getAppIconUrl(name);
   const fallback = getAppIconFallback(name);
 
   if (!url || error) {

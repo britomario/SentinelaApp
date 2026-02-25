@@ -23,6 +23,10 @@ REVENUECAT_ANDROID_API_KEY=sua-chave-android
 REVENUECAT_IOS_API_KEY=sua-chave-ios
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+NEXTDNS_PROFILE_ID=abc123
+NEXTDNS_API_KEY=seu-nextdns-api-key
+DNS_VALIDATION_BLOCKED_DOMAIN=pornhub.com
 ```
 
 ### 2. O que cada variável controla
@@ -33,6 +37,8 @@ SUPABASE_ANON_KEY=eyJ...
 | `ONESIGNAL_APP_ID` | Notificações push funcionam |
 | `REVENUECAT_*` | Botão "Ativar licença anual" abre fluxo de compra in-app |
 | `SUPABASE_*` | Dados de família/sync (se usar Supabase) |
+| `NEXTDNS_*` | Sincroniza perfil DNS familiar e regras de bloqueio no NextDNS |
+| `DNS_VALIDATION_BLOCKED_DOMAIN` | Domínio usado no health-check de bloqueio DNS |
 | `SENTRY_DSN` | Crash reporting em produção |
 
 ### 3. Backend para Ações Rápidas
@@ -72,6 +78,9 @@ Se não quiser usar react-native-config, injete variáveis em `metro.config.js` 
 | `MAPS_PROVIDER` | Não | Provedor de mapas | `google` |
 | `MAPS_API_KEY` | Não | Chave API mapas | - |
 | `DNS_POLICY_API_BASE_URL` | Não | API de políticas DNS | - |
+| `DNS_VALIDATION_BLOCKED_DOMAIN` | Não | Domínio para validar bloqueio DNS | `pornhub.com` |
+| `NEXTDNS_PROFILE_ID` | Sim (NextDNS) | ID do perfil NextDNS | `abc123` |
+| `NEXTDNS_API_KEY` | Sim (NextDNS) | API Key da conta NextDNS | `xxxxx` |
 
 ### Servidor (API / Vercel/Node)
 
@@ -79,7 +88,25 @@ Se não quiser usar react-native-config, injete variáveis em `metro.config.js` 
 |----------|-------------|-----------|
 | `ONESIGNAL_REST_API_KEY` | Sim (dispatch) | REST API Key OneSignal |
 | `ONESIGNAL_APP_ID` | Sim | App ID OneSignal |
-| `REVENUECAT_WEBHOOK_SECRET` | Não | Webhook secret RevenueCat |
+| `REVENUECAT_WEBHOOK_SECRET` | Sim (webhook) | Webhook secret RevenueCat para validar assinatura |
+| `SUPABASE_SERVICE_ROLE_KEY` | Sim (API server) | Service role para upserts server-side (obrigatório; não usar ANON_KEY) |
+| `SUPABASE_URL` | Sim | URL do projeto Supabase |
+| `NEXTDNS_PROFILE_ID` | Sim (DNS real) | Perfil que será aplicado aos dispositivos |
+| `NEXTDNS_API_KEY` | Sim (DNS real) | Chave de autenticação da API NextDNS |
+
+### Variáveis obrigatórias para deploy na Vercel
+
+Configure em **Project Settings > Environment Variables** antes do deploy:
+
+| Variável | Usado em | Nota |
+|----------|----------|------|
+| `SUPABASE_URL` | _supabaseServer | URL do projeto (ex.: `https://xxx.supabase.co`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | _supabaseServer | Chave service role (nunca anon) |
+| `ONESIGNAL_APP_ID` | alerts/dispatch | App ID OneSignal |
+| `ONESIGNAL_REST_API_KEY` | alerts/dispatch | REST API Key OneSignal |
+| `REVENUECAT_WEBHOOK_SECRET` | revenuecat/webhook | Secret do webhook; sem ele o webhook aceita qualquer requisição |
+| `NEXTDNS_PROFILE_ID` | dns/profile-sync | ID do perfil NextDNS |
+| `NEXTDNS_API_KEY` | dns/profile-sync | API Key da conta NextDNS |
 
 ## Ambientes
 

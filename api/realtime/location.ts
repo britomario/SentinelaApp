@@ -17,19 +17,47 @@ type LocationPayload = {
   timestamp: number;
 };
 
-const memoryStore: Record<string, LocationPayload> = {};
+import {getSupabaseServerClient} from '../_supabaseServer';
 
 export default async function handler(
   req: RequestLike,
   res: ResponseLike,
 ): Promise<void> {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    res.status(500).json({error: 'supabase_not_configured'});
+    return;
+  }
+
   if (req.method === 'GET') {
     const childId = req.query?.childId;
     if (!childId) {
       res.status(400).json({error: 'child_id_required'});
       return;
     }
-    res.status(200).json(memoryStore[childId] ?? null);
+    const {data, error} = await supabase
+      .from('child_location_state')
+      .select('child_id, latitude, longitude, accuracy, timestamp')
+      .eq('child_id', childId)
+      .maybeSingle();
+    if (error) {
+      res.status(500).json({error: 'location_fetch_failed'});
+      return;
+    }
+    if (!data) {
+      res.status(200).json(null);
+      return;
+    }
+    res.status(200).json({
+      childId: data.child_id,
+      latitude: Number(data.latitude),
+      longitude: Number(data.longitude),
+      accuracy:
+        data.accuracy === null || data.accuracy === undefined
+          ? undefined
+          : Number(data.accuracy),
+      timestamp: Number(data.timestamp),
+    });
     return;
   }
 
@@ -44,6 +72,20 @@ export default async function handler(
     return;
   }
 
-  memoryStore[payload.childId] = payload;
+  const {error} = await supabase.from('child_location_state').upsert(
+    {
+      child_id: payload.childId,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      accuracy: payload.accuracy ?? null,
+      timestamp: payload.timestamp,
+      updated_at: new Date().toISOString(),
+    },
+    {onConflict: 'child_id'},
+  );
+  if (error) {
+    res.status(500).json({error: 'location_upsert_failed'});
+    return;
+  }
   res.status(200).json({ok: true});
 }

@@ -27,7 +27,7 @@ export async function dispatchQuickAction(
 ): Promise<DispatchResult> {
   const apiBase = getEnv('SYNC_API_BASE_URL');
   if (!apiBase) {
-    return {ok: true, localOnly: true};
+    return {ok: false, reason: 'api_not_configured'};
   }
 
   try {
