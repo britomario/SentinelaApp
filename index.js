@@ -1,6 +1,8 @@
 /**
  * @format
+ * Polyfills must be imported before any crypto-dependent code.
  */
+import 'react-native-get-random-values';
 
 import {AppRegistry} from 'react-native';
 import App from './App';

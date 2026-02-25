@@ -34,6 +34,14 @@ local.properties
 *.keystore
 !debug.keystore
 
+# Environment (secrets)
+.env
+.env.local
+.env.*.local
+
+# Local backlog (não versionado)
+BACKLOG.md
+
 # node.js
 #
 node_modules/
