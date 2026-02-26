@@ -47,7 +47,9 @@ import {
 import AppGrid from '../../components/child/AppGrid';
 import AppIcon from '../../components/apps/AppIcon';
 import PinGate from '../../components/security/PinGate';
-import ProtectionLevelBadge from '../../components/child/ProtectionLevelBadge';
+import ProtectionLevelBadge, {
+  computeLevelProgress,
+} from '../../components/child/ProtectionLevelBadge';
 import {useToast} from '../../components/feedback/ToastProvider';
 import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
 import {RewardLottieOverlay} from '../../components/feedback/RewardLottieOverlay';
@@ -151,32 +153,47 @@ export default function ChildModeScreen(): React.JSX.Element {
     getChildPairingConfig().then(config => setIsPaired(!!config));
   }, []);
 
+  /*
+   * Card Sentinela ativo - fluxo de status de localização:
+   *
+   * Foreground: watchPosition → armazena timestamp em AsyncStorage (LAST_LOCATION_TS_KEY)
+   * → publishChildLocation envia ao servidor. O card usa apenas o timestamp local.
+   *
+   * Background: em RN o watchPosition pode ter precisão/intervalo limitado em segundo plano.
+   *
+   * Estados: Inicializando... | Conectado e protegido | Sem atualização recente |
+   *         Permissão negada | Falha ao iniciar
+   */
+  const STALE_MINUTES = 10;
+  const POLL_INTERVAL_MS = 15000;
+
   useEffect(() => {
     startBackgroundLocationTracking(childId)
       .then(ok => {
         if (!ok) {
-          setLocationStatus('Permissão de localização negada.');
+          setLocationStatus('Permissão negada');
           return;
         }
-        setLocationStatus('Conectado e protegido.');
+        /* Mantém "Inicializando..." até o primeiro timestamp no poll */
       })
-      .catch(() => setLocationStatus('Falha ao iniciar rastreamento.'));
+      .catch(() => setLocationStatus('Falha ao iniciar'));
 
     const id = setInterval(() => {
       getLastLocationTimestamp()
         .then(ts => {
           if (!ts) {
+            /* Nunca conectou: não mostrar "Sem atualização" antes do primeiro timestamp */
             return;
           }
           const deltaMinutes = Math.floor((Date.now() - ts) / 60000);
-          if (deltaMinutes >= 10) {
-            setLocationStatus('Sem atualização recente. Verifique a conexão.');
+          if (deltaMinutes >= STALE_MINUTES) {
+            setLocationStatus('Sem atualização recente');
             return;
           }
-          setLocationStatus('Conectado e protegido.');
+          setLocationStatus('Conectado e protegido');
         })
         .catch(() => undefined);
-    }, 15000);
+    }, POLL_INTERVAL_MS);
 
     return () => {
       clearInterval(id);
@@ -188,13 +205,13 @@ export default function ChildModeScreen(): React.JSX.Element {
     if (tasksDone.has(taskId)) {
       return;
     }
-    const newBalance = await markTaskDone(taskId, reward);
-    setTokens(newBalance);
+    const {balance, rewarded} = await markTaskDone(taskId, reward);
+    setTokens(balance);
     setTasksDone(prev => new Set([...prev, taskId]));
     setShowRewardLottie(true);
     showToast({
       kind: 'success',
-      title: `+${reward} tokens!`,
+      title: `+${rewarded} tokens!`,
       message: 'Parabéns pela tarefa concluída.',
     });
     refreshData();
@@ -252,7 +269,7 @@ export default function ChildModeScreen(): React.JSX.Element {
   };
 
   const protectionActive = locationStatus.includes('Conectado');
-  const level = Math.min(5, Math.floor(tokens / 50) + 1);
+  const levelProgress = computeLevelProgress(tokens);
 
   const exitRestMode = async () => {
     await applyRestModeDisplay(false);
@@ -390,7 +407,11 @@ export default function ChildModeScreen(): React.JSX.Element {
 
           {/* Badge de nível */}
           <View style={styles.badgeRow}>
-            <ProtectionLevelBadge level={level} label="Nível" />
+            <ProtectionLevelBadge
+              level={levelProgress.level}
+              label="Nível"
+              progress={levelProgress}
+            />
           </View>
 
           {/* Saldo de Tokens */}
@@ -629,7 +650,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     color: Colors.textPrimary,
-    padding: 8,
+    padding: 16,
   },
 
   statusPill: {

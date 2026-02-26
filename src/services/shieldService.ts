@@ -131,7 +131,7 @@ export async function activateShield(pin = ''): Promise<ShieldStatus> {
 
     try {
       await VpnModule?.setUpstreamDns?.(profile.fallbackDnsIp);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[Shield] Failed setting upstream DNS', error);
       throw new Error('shield_dns_setup_failed');
     }
@@ -156,8 +156,16 @@ export async function activateShield(pin = ''): Promise<ShieldStatus> {
 
     try {
       await VpnModule.startVpn(pin);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[Shield] Failed starting VPN module', error);
+      const code = (error as {code?: string})?.code ?? '';
+      const msg = (error as {message?: string})?.message ?? '';
+      if (code === 'PIN_REQUIRED' || msg.includes('PIN')) {
+        throw new Error('shield_pin_required');
+      }
+      if (code === 'VPN_DENIED') {
+        throw new Error('shield_vpn_denied');
+      }
       throw new Error('shield_vpn_start_failed');
     }
 
@@ -185,10 +193,17 @@ export async function deactivateShield(pin = ''): Promise<ShieldStatus> {
   }
   shieldTransitionInFlight = true;
   try {
-    await VpnModule?.stopVpn?.(pin).catch?.((error: unknown) => {
+    try {
+      await VpnModule?.stopVpn?.(pin);
+    } catch (error: unknown) {
       console.error('[Shield] Failed stopping VPN module', error);
+      const code = (error as {code?: string})?.code ?? '';
+      const msg = (error as {message?: string})?.message ?? '';
+      if (code === 'PIN_REQUIRED' || msg.includes('PIN')) {
+        throw new Error('shield_pin_required');
+      }
       throw new Error('shield_vpn_stop_failed');
-    });
+    }
     const profile = await getShieldProfile();
     const next: ShieldStatus = {
       enabled: false,
@@ -209,6 +224,33 @@ export async function toggleShield(nextEnabled: boolean, pin = ''): Promise<Shie
     return activateShield(pin);
   }
   return deactivateShield(pin);
+}
+
+/**
+ * Maps shield-related errors to user-friendly messages.
+ * Use in catch blocks of DashboardScreen and ConfigScreen toggle handlers.
+ */
+export function getShieldErrorMessage(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg === 'shield_vpn_denied') {
+    return 'Permissão de VPN negada. Ative nas configurações do dispositivo.';
+  }
+  if (msg === 'shield_pin_required') {
+    return 'Digite o PIN correto para alterar o Escudo.';
+  }
+  if (msg === 'shield_dns_setup_failed') {
+    return 'Erro na configuração DNS. Tente novamente.';
+  }
+  if (msg === 'shield_vpn_start_failed') {
+    return 'Não foi possível ativar o Escudo. Verifique se a VPN está permitida e tente novamente.';
+  }
+  if (msg === 'shield_vpn_stop_failed') {
+    return 'Não foi possível pausar o Escudo. Tente novamente.';
+  }
+  if (msg === 'shield_transition_in_progress') {
+    return 'Aguarde, operação em andamento.';
+  }
+  return 'Não foi possível alterar o Escudo. Verifique se a VPN está permitida e tente novamente.';
 }
 
 export async function syncBlacklistToShield(): Promise<void> {

@@ -42,6 +42,7 @@ import {
 import {
   activateShield,
   deactivateShield,
+  getShieldErrorMessage,
   setShieldProfile,
   syncBlacklistToShield,
 } from '../../services/shieldService';
@@ -363,7 +364,7 @@ export default function ConfigScreen(): React.JSX.Element {
       showToast({
         kind: 'error',
         title: 'Não foi possível conectar ao Escudo',
-        message: 'Verifique sua internet e tente novamente.',
+        message: getShieldErrorMessage(error),
       });
     } finally {
       setIsShieldLoading(false);

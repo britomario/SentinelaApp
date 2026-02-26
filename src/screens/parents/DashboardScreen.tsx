@@ -24,7 +24,7 @@ import {hasSeenTour, markTourSeen} from '../../services/onboardingState';
 import {sendGuardianAlert} from '../../services/notifications/oneSignalService';
 import {subscribeToChildLocation} from '../../services/realtime/socketService';
 import {useShieldStatus} from '../../hooks/useShieldStatus';
-import {toggleShield} from '../../services/shieldService';
+import {toggleShield, getShieldErrorMessage} from '../../services/shieldService';
 import {BorderRadius, Colors, Shadows, Spacing} from '../../theme/colors';
 
 const {AppBlockModule} = NativeModules as any;
@@ -275,7 +275,7 @@ export default function DashboardScreen(): React.JSX.Element {
       showToast({
         kind: 'error',
         title: 'Não foi possível conectar ao Escudo',
-        message: 'Verifique sua internet e tente novamente.',
+        message: getShieldErrorMessage(error),
       });
     } finally {
       setIsShieldLoading(false);

@@ -1,4 +1,6 @@
 import React from 'react';
+import {View} from 'react-native';
+import PolyfillCrypto from 'react-native-webview-crypto';
 import RootNavigator from './src/navigation/RootNavigator';
 import {ToastProvider} from './src/components/feedback/ToastProvider';
 import {ReviewPromptProvider} from './src/components/feedback/ReviewPromptProvider';
@@ -36,12 +38,17 @@ export default function App(): React.ReactElement {
   }, []);
 
   return React.createElement(
-    ToastProvider,
-    null,
+    View,
+    {style: {flex: 1}},
+    React.createElement(PolyfillCrypto),
     React.createElement(
-      PairingDeepLinkHandler,
+      ToastProvider,
       null,
-      React.createElement(ReviewPromptProvider, null, React.createElement(RootNavigator)),
+      React.createElement(
+        PairingDeepLinkHandler,
+        null,
+        React.createElement(ReviewPromptProvider, null, React.createElement(RootNavigator)),
+      ),
     ),
   );
 }

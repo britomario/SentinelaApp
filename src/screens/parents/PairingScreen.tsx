@@ -137,6 +137,13 @@ export default function PairingScreen(): React.JSX.Element {
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
+    if (
+      error.message.includes('WebCrypto') ||
+      error.message.includes('criptografia') ||
+      error.message.toLowerCase().includes('crypto')
+    ) {
+      return 'Criptografia indisponivel. Reinicie o app e tente novamente.';
+    }
     return error.message;
   }
   return 'Nao foi possivel gerar o pareamento agora.';

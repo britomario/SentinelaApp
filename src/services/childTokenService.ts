@@ -10,6 +10,19 @@ const TASKS_DONE_KEY = '@sentinela/child_tasks_done';
 
 const DEFAULT_TOKENS = 150;
 const MINUTES_PER_100_TOKENS = 30;
+const TOKENS_PER_LEVEL = 50;
+
+/** Multiplicador de recompensa por tarefa conforme nível (1–5). */
+function getLevelMultiplier(level: number): number {
+  const multipliers: Record<number, number> = {
+    1: 1,
+    2: 1.1,
+    3: 1.2,
+    4: 1.3,
+    5: 1.5,
+  };
+  return multipliers[Math.min(5, Math.max(1, level))] ?? 1;
+}
 
 export type AppUnlock = {
   appId: string;
@@ -85,13 +98,23 @@ export function tokensForMinutes(minutes: number): number {
   return Math.ceil((minutes / MINUTES_PER_100_TOKENS) * 100);
 }
 
-export async function markTaskDone(taskId: string, reward: number): Promise<number> {
+export async function markTaskDone(
+  taskId: string,
+  reward: number,
+): Promise<{balance: number; rewarded: number}> {
   const done = await getTasksDone();
-  if (done.has(taskId)) {return await getTokens();}
+  if (done.has(taskId)) {
+    return {balance: await getTokens(), rewarded: 0};
+  }
+  const currentTokens = await getTokens();
+  const level = Math.min(5, Math.floor(currentTokens / TOKENS_PER_LEVEL) + 1);
+  const multiplier = getLevelMultiplier(level);
+  const effectiveReward = Math.round(reward * multiplier);
   const next = new Set(done);
   next.add(taskId);
   await AsyncStorage.setItem(TASKS_DONE_KEY, JSON.stringify([...next]));
-  return await addTokens(reward);
+  const balance = await addTokens(effectiveReward);
+  return {balance, rewarded: effectiveReward};
 }
 
 export async function getTasksDone(): Promise<Set<string>> {

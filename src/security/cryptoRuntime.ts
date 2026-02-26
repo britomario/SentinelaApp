@@ -38,12 +38,14 @@ export function isSecureCryptoContext(): boolean {
 
 /**
  * Returns SubtleCrypto from globalThis.crypto when available.
- * Throws with controlled error and telemetry when crypto is unavailable (e.g. RN Hermes).
+ * Uses polyfill (react-native-webview-crypto) when native subtle is absent (e.g. RN Hermes).
+ * Throws with controlled error and telemetry when crypto is unavailable.
  */
 export function getSubtleCrypto(): SubtleCrypto {
-  const native = (globalThis as {crypto?: Crypto}).crypto?.subtle;
-  if (native) {
-    return native;
+  const crypto = (globalThis as {crypto?: Crypto}).crypto;
+  const subtle = crypto?.subtle;
+  if (subtle) {
+    return subtle as SubtleCrypto;
   }
   captureHandledError(new Error(WEB_CRYPTO_UNAVAILABLE), 'crypto_subtle_unavailable');
   throw new Error(WEB_CRYPTO_UNAVAILABLE);
