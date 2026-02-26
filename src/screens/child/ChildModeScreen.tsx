@@ -16,9 +16,8 @@ import {
   NativeModules,
   TextInput,
   FlatList,
+  Platform,
 } from 'react-native';
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import LinearGradient from 'react-native-linear-gradient';
 import {
   getLastLocationTimestamp,
@@ -38,24 +37,30 @@ import {
 } from '../../services/childTokenService';
 import {useChildCreditsApps} from '../../hooks/useChildCreditsApps';
 import {useChildTasks} from '../../hooks/useChildTasks';
-import {isRestModeActive, setRestModeActive} from '../../services/restModeService';
+import {
+  isRestModeActive,
+  setRestModeActive,
+  applyRestModeDisplay,
+  requestDisplayPermission,
+} from '../../services/restModeService';
 
 import AppGrid from '../../components/child/AppGrid';
 import AppIcon from '../../components/apps/AppIcon';
+import PinGate from '../../components/security/PinGate';
 import ProtectionLevelBadge from '../../components/child/ProtectionLevelBadge';
 import {useToast} from '../../components/feedback/ToastProvider';
 import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
 import {RewardLottieOverlay} from '../../components/feedback/RewardLottieOverlay';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Colors, Spacing, BorderRadius, Shadows} from '../../theme/colors';
 import {sendGuardianAlert} from '../../services/notifications/oneSignalService';
 
-const {AppBlockModule} = NativeModules as any;
+const {AppBlockModule, SecurityModule} = NativeModules as any;
 
 const TOKENS_PER_30MIN = 100;
 
-type RootStackParamList = { RestMode: undefined };
 export default function ChildModeScreen(): React.JSX.Element {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'RestMode'>>();
+  const insets = useSafeAreaInsets();
   const {showToast} = useToast();
   const {recordReviewSignal} = useReviewPrompt();
   const {
@@ -80,6 +85,8 @@ export default function ChildModeScreen(): React.JSX.Element {
   const [addAppSearch, setAddAppSearch] = useState('');
   const [showRewardLottie, setShowRewardLottie] = useState(false);
   const [restModeActive, setRestModeActiveState] = useState(false);
+  const [showRestModePinGate, setShowRestModePinGate] = useState(false);
+  const [displayPermissionReady, setDisplayPermissionReady] = useState(true);
   const [childId, setChildId] = useState<string>('local-child');
   const sosTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sosTriggeredRef = useRef(false);
@@ -116,6 +123,23 @@ export default function ChildModeScreen(): React.JSX.Element {
   useEffect(() => {
     refreshData();
   }, [refreshData]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (Platform.OS === 'android' && NativeModules.DisplayWellnessModule) {
+        const hasPermission = await requestDisplayPermission();
+        if (mounted) {
+          setDisplayPermissionReady(hasPermission);
+        }
+        const active = await isRestModeActive();
+        await applyRestModeDisplay(active);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     getCurrentChildId()
@@ -230,6 +254,38 @@ export default function ChildModeScreen(): React.JSX.Element {
   const protectionActive = locationStatus.includes('Conectado');
   const level = Math.min(5, Math.floor(tokens / 50) + 1);
 
+  const exitRestMode = async () => {
+    await applyRestModeDisplay(false);
+    await setRestModeActive(false);
+    setRestModeActiveState(false);
+    setShowRestModePinGate(false);
+    showToast({kind: 'success', title: 'Modo Descanso desativado'});
+  };
+
+  const handleRestModeToggle = async () => {
+    if (!restModeActive) {
+      try {
+        await setRestModeActive(true);
+        await applyRestModeDisplay(true);
+        setRestModeActiveState(true);
+        showToast({kind: 'success', title: 'Modo Descanso ativado'});
+      } catch {
+        showToast({kind: 'error', title: 'Falha ao ativar Modo Descanso'});
+      }
+      return;
+    }
+    const hasPin = await SecurityModule?.hasSecurityPin?.().catch(() => false);
+    if (hasPin === false) {
+      try {
+        await exitRestMode();
+      } catch {
+        showToast({kind: 'error', title: 'Falha ao desativar Modo Descanso'});
+      }
+      return;
+    }
+    setShowRestModePinGate(true);
+  };
+
   const stopSosTimer = () => {
     if (sosTimerRef.current) {
       clearInterval(sosTimerRef.current);
@@ -308,6 +364,9 @@ export default function ChildModeScreen(): React.JSX.Element {
         style={styles.gradient}
         start={{x: 0, y: 0}}
         end={{x: 1, y: 1}}>
+        <View style={[styles.header, {paddingTop: insets.top, paddingHorizontal: Spacing.lg}]}>
+          <Text style={styles.title}>Espaço Seguro</Text>
+        </View>
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
@@ -404,24 +463,17 @@ export default function ChildModeScreen(): React.JSX.Element {
             />
           )}
 
+          {Platform.OS === 'android' && !displayPermissionReady && (
+            <Text style={styles.restModeHint}>
+              Conceda permissão de configurações para reduzir o brilho automaticamente.
+            </Text>
+          )}
           <TouchableOpacity
             style={[
               styles.restModeBtn,
               restModeActive ? styles.restModeBtnActive : styles.restModeBtnInactive,
             ]}
-            onPress={async () => {
-              const next = !restModeActive;
-              await setRestModeActive(next);
-              setRestModeActiveState(next);
-              if (next) {
-                navigation.navigate('RestMode');
-              } else {
-                showToast({
-                  kind: 'success',
-                  title: 'Modo Descanso desativado',
-                });
-              }
-            }}>
+            onPress={handleRestModeToggle}>
             <Text style={[styles.restModeBtnText, restModeActive ? styles.restModeBtnTextActive : null]}>
               {restModeActive ? '☀️ Desativar Modo Descanso' : '🌙 Ativar Modo Descanso'}
             </Text>
@@ -546,18 +598,38 @@ export default function ChildModeScreen(): React.JSX.Element {
           </View>
         </View>
       </Modal>
+
+      <PinGate
+        visible={showRestModePinGate}
+        onClose={() => setShowRestModePinGate(false)}
+        onSuccess={exitRestMode}
+        title="Digite o PIN para encerrar o Modo Descanso"
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {flex: 1},
+  header: {
+    paddingBottom: Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
   gradient: {flex: 1},
   scroll: {flex: 1},
   scrollContent: {
     paddingTop: Spacing.xxl,
     paddingHorizontal: Spacing.lg,
     paddingBottom: 120,
+  },
+
+  title: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    padding: 8,
   },
 
   statusPill: {
@@ -713,8 +785,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  restModeBtn: {
+  restModeHint: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    textAlign: 'center',
     marginTop: Spacing.lg,
+    marginBottom: Spacing.sm,
+  },
+  restModeBtn: {
+    marginTop: Spacing.sm,
     borderRadius: 24,
     padding: Spacing.lg,
     alignItems: 'center',

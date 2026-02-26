@@ -191,7 +191,7 @@ export async function deleteChildTask(id: string): Promise<boolean> {
 export async function getTasksDoneIds(): Promise<Set<string>> {
   try {
     const raw = await AsyncStorage.getItem(TASKS_DONE_KEY);
-    if (!raw) return new Set();
+    if (!raw) {return new Set();}
     const parsed = JSON.parse(raw) as string[];
     return new Set(Array.isArray(parsed) ? parsed : []);
   } catch {

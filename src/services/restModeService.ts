@@ -49,7 +49,7 @@ export async function setRestModeAuto(auto: boolean): Promise<void> {
 export async function getRestModeCoords(): Promise<RestModeCoords> {
   try {
     const raw = await AsyncStorage.getItem(REST_MODE_COORDS_KEY);
-    if (!raw) return null;
+    if (!raw) {return null;}
     const parsed = JSON.parse(raw) as { lat: number; lng: number };
     if (typeof parsed?.lat === 'number' && typeof parsed?.lng === 'number') {
       return parsed;
@@ -75,7 +75,7 @@ export function getSunsetSunriseToday(coords: { lat: number; lng: number }): { s
 }
 
 export async function applyRestModeDisplay(active: boolean): Promise<void> {
-  if (Platform.OS !== 'android' || !DisplayWellnessModule) return;
+  if (Platform.OS !== 'android' || !DisplayWellnessModule) {return;}
   try {
     if (active) {
       await DisplayWellnessModule.setBrightness(0.2);
@@ -92,7 +92,7 @@ export async function applyRestModeDisplay(active: boolean): Promise<void> {
 }
 
 export async function requestDisplayPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android' || !DisplayWellnessModule) return false;
+  if (Platform.OS !== 'android' || !DisplayWellnessModule) {return false;}
   try {
     const canWrite = await DisplayWellnessModule.canWriteSettings();
     if (!canWrite) {

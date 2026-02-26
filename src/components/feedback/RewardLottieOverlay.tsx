@@ -25,7 +25,7 @@ export function RewardLottieOverlay({visible, onFinish}: Props): React.JSX.Eleme
     }
   }, [visible]);
 
-  if (!visible) return <></>;
+  if (!visible) {return <></>;}
 
   return (
     <Modal

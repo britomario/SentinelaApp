@@ -42,19 +42,19 @@ export function useChildTasks(): {
 
   const createTask = useCallback(async (title: string, rewardCoins: number) => {
     const created = await createChildTask(title, rewardCoins);
-    if (created) await refresh();
+    if (created) {await refresh();}
     return created;
   }, [refresh]);
 
   const updateTask = useCallback(async (id: string, title: string, rewardCoins: number) => {
     const ok = await updateChildTask(id, title, rewardCoins);
-    if (ok) await refresh();
+    if (ok) {await refresh();}
     return ok;
   }, [refresh]);
 
   const removeTask = useCallback(async (id: string) => {
     const ok = await deleteChildTask(id);
-    if (ok) await refresh();
+    if (ok) {await refresh();}
     return ok;
   }, [refresh]);
 
@@ -64,7 +64,7 @@ export function useChildTasks(): {
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) {return;}
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
 
@@ -90,7 +90,7 @@ export function useChildTasks(): {
     setupSubscription().catch(() => undefined);
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      if (channel) {supabase.removeChannel(channel);}
     };
   }, [refresh]);
 

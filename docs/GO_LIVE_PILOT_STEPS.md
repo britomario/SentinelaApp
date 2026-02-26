@@ -47,7 +47,9 @@ Critério para avançar:
    - `REVENUECAT_WEBHOOK_SECRET`
    - `NEXTDNS_PROFILE_ID`
    - `NEXTDNS_API_KEY`
-3. Faça o deploy e valide os endpoints:
+3. No RevenueCat Dashboard (Webhooks), configure o endpoint de webhook e envie o header:
+   - `Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>`
+4. Faça o deploy e valide os endpoints:
    - `POST /api/alerts/dispatch`
    - `POST` / `GET /api/realtime/location`
    - `POST /api/dns/profile-sync`

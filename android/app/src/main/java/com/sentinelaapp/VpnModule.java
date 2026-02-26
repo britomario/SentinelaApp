@@ -110,8 +110,23 @@ public class VpnModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void setNextDnsDotHost(String dotHost, Promise promise) {
+        try {
+            SentinelaVpnService.setNextDnsDotHost(dotHost);
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("NEXTDNS_PROFILE_ERROR", e.getMessage());
+        }
+    }
+
+    @ReactMethod
     public void getUpstreamDns(Promise promise) {
         promise.resolve(SentinelaVpnService.getUpstreamDns());
+    }
+
+    @ReactMethod
+    public void isVpnActive(Promise promise) {
+        promise.resolve(SentinelaVpnService.isVpnActive());
     }
 
     @ReactMethod

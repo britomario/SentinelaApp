@@ -104,6 +104,19 @@ export async function activateAnnualLicense(): Promise<PremiumState> {
   return getPremiumState();
 }
 
+export async function activateMonthlyLicense(): Promise<PremiumState> {
+  const initialized = await initializeRevenueCat();
+  if (!initialized) {
+    return getPremiumState();
+  }
+  const purchaseOk = await purchasePackageByIdentifier('$rc_monthly');
+  if (!purchaseOk) {
+    return getPremiumState();
+  }
+  await AsyncStorage.setItem(LICENSE_KEY, '1');
+  return getPremiumState();
+}
+
 function resolveTrialDaysLeft(trialStartedAt: number | null): number {
   if (!trialStartedAt) {
     return TRIAL_DAYS;

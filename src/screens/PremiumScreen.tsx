@@ -1,15 +1,18 @@
-import React, {useEffect, useState} from 'react';
-import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import PricingCard from '../components/premium/PricingCard';
-import {useToast} from '../components/feedback/ToastProvider';
+import PlanComparison from '../components/premium/PlanComparison';
+import PlanCard from '../components/premium/PlanCard';
+import { useToast } from '../components/feedback/ToastProvider';
 import {
   activateAnnualLicense,
+  activateMonthlyLicense,
   getPremiumState,
   PremiumState,
   startTrial,
 } from '../services/subscriptionService';
-import {openStore} from '../services/storeUrls';
+import { openStore } from '../services/storeUrls';
+import { BorderRadius, Colors, Shadows, Spacing } from '../theme/colors';
 
 function formatStatus(state: PremiumState): string {
   if (state.status === 'premium_active' || state.annualActive) {
@@ -32,9 +35,28 @@ const INITIAL_STATE: PremiumState = {
   annualActive: false,
 };
 
+const COMPARISON_ITEMS = [
+  { label: 'Pareamento familiar', icon: 'infinity' as const, free: true, premium: true },
+  { label: 'Modo Dormir', icon: 'moon' as const, free: true, premium: true },
+  { label: 'Bloqueio de Aplicativos', icon: 'lock' as const, free: 'Até 3', premium: 'Ilimitado' },
+  { label: 'Controle de Tarefas', icon: 'shieldCheck' as const, free: 'Até 3', premium: 'Ilimitado' },
+  { label: 'Bloqueio de Pornografia', icon: 'shieldAlert' as const, free: false, premium: true },
+  { label: 'Proteção 24/7 no dispositivo', icon: 'shield' as const, free: false, premium: true },
+  { label: 'Relatórios detalhados de risco', icon: 'barChart' as const, free: false, premium: true },
+  { label: 'Suporte prioritário', icon: 'headset' as const, free: false, premium: true },
+];
+
+type PlanType = 'monthly' | 'annual';
+
+const MONTHLY_PRICE = 14.9;
+const ANNUAL_PRICE = 54.9;
+const ANNUAL_EQUIVALENT_MONTHLY = 4.58;
+const SAVINGS_PERCENT = 69;
+
 export default function PremiumScreen(): React.JSX.Element {
   const [state, setState] = useState<PremiumState>(INITIAL_STATE);
-  const {showToast} = useToast();
+  const [selectedPlan, setSelectedPlan] = useState<PlanType>('annual');
+  const { showToast } = useToast();
 
   useEffect(() => {
     getPremiumState().then(setState).catch(() => setState(INITIAL_STATE));
@@ -50,13 +72,14 @@ export default function PremiumScreen(): React.JSX.Element {
     });
   };
 
-  const handleAnnual = async () => {
-    const next = await activateAnnualLicense();
+  const handlePurchase = async () => {
+    const activate = selectedPlan === 'annual' ? activateAnnualLicense : activateMonthlyLicense;
+    const next = await activate();
     setState(next);
-    if (next.annualActive) {
+    if (next.annualActive || next.status === 'premium_active') {
       showToast({
         kind: 'success',
-        title: 'Licença anual ativa',
+        title: 'Premium ativo',
         message: 'Recursos premium desbloqueados no dispositivo.',
       });
     } else {
@@ -71,23 +94,48 @@ export default function PremiumScreen(): React.JSX.Element {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Sentinela Premium</Text>
+      <Text style={styles.title}>Espaço</Text>
       <Text style={styles.subtitle}>
         Desbloqueie IA avançada, políticas de DNS reforçadas e proteção parental contínua.
       </Text>
+
+      <PlanComparison benefits={COMPARISON_ITEMS} />
 
       <View style={styles.statusCard}>
         <Text style={styles.statusTitle}>Status atual</Text>
         <Text style={styles.statusLine}>{formatStatus(state)}</Text>
       </View>
 
-      <PricingCard
-        annualPrice={54.9}
-        subtitle="Plano ideal para cobertura familiar durante todo o ano."
-        highlight="Menos que R$0,16 por dia para proteção completa."
-        ctaLabel="Ativar licença anual"
-        onPress={handleAnnual}
-      />
+      <Text style={styles.planSectionTitle}>Escolha seu plano</Text>
+      <View style={styles.planCardsRow}>
+        <PlanCard
+          type="monthly"
+          price={MONTHLY_PRICE}
+          periodLabel="Mensal"
+          onSelect={() => setSelectedPlan('monthly')}
+          selected={selectedPlan === 'monthly'}
+        />
+        <PlanCard
+          type="annual"
+          price={ANNUAL_PRICE}
+          periodLabel="Anual"
+          equivalentMonthly={ANNUAL_EQUIVALENT_MONTHLY}
+          savingsPercent={SAVINGS_PERCENT}
+          badge="Mais vantajoso"
+          highlighted
+          onSelect={() => setSelectedPlan('annual')}
+          selected={selectedPlan === 'annual'}
+        />
+      </View>
+
+      <TouchableOpacity
+        style={styles.ctaButton}
+        onPress={handlePurchase}
+        activeOpacity={0.85}>
+        <Text style={styles.ctaButtonText}>
+          {selectedPlan === 'annual' ? 'Ativar licença anual' : 'Ativar plano mensal'}
+        </Text>
+      </TouchableOpacity>
 
       <View style={styles.trialBox}>
         <Text style={styles.trialTitle}>Teste grátis de 7 dias</Text>
@@ -110,39 +158,68 @@ export default function PremiumScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: Colors.background,
   },
   content: {
-    padding: 20,
-    paddingBottom: 44,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.xxl,
     gap: 14,
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#0F172A',
+    color: Colors.textPrimary,
   },
   subtitle: {
-    color: '#475569',
+    color: Colors.textSecondary,
     lineHeight: 20,
   },
   statusCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.low,
   },
   statusTitle: {
     fontWeight: '700',
-    color: '#0F172A',
+    color: Colors.textPrimary,
     marginBottom: 6,
   },
   statusLine: {
-    color: '#334155',
+    color: Colors.textSecondary,
+  },
+  planSectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    marginTop: Spacing.sm,
+  },
+  planCardsRow: {
+    flexDirection: 'row',
+    marginTop: Spacing.sm,
+    gap: Spacing.md,
+  },
+  ctaButton: {
+    marginTop: Spacing.lg,
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    ...Shadows.low,
+  },
+  ctaButtonText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '700',
   },
   trialBox: {
     backgroundColor: '#EEF2FF',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
   },
   trialTitle: {
     fontSize: 16,
@@ -154,7 +231,7 @@ const styles = StyleSheet.create({
     color: '#3730A3',
   },
   trialBtn: {
-    marginTop: 12,
+    marginTop: Spacing.sm,
     color: '#1D4ED8',
     fontWeight: '700',
   },

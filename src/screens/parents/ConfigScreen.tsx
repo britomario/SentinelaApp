@@ -6,6 +6,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  ActivityIndicator,
   AppState,
   DeviceEventEmitter,
   NativeModules,
@@ -18,6 +19,7 @@ import {
   View,
   Modal,
 } from 'react-native';
+import {useRoute} from '@react-navigation/native';
 
 import AppList from '../../components/settings/AppList';
 import DnsToggle from '../../components/settings/DnsToggle';
@@ -32,15 +34,28 @@ import {encryptAndStoreMonitoringEvent} from '../../security/monitoringVault';
 import {DNS_PROFILES, type DnsMode, getDnsProfile} from '../../services/dnsProfiles';
 import {syncDnsPolicyForChild} from '../../services/dnsPolicyService';
 import {resolveDomainWithDoh} from '../../services/dohEngineService';
+import {
+  addDomainToList,
+  getManualDomainLists,
+  removeDomainFromList,
+} from '../../services/manualDomainListService';
+import {
+  activateShield,
+  deactivateShield,
+  setShieldProfile,
+  syncBlacklistToShield,
+} from '../../services/shieldService';
 import {Colors, Spacing, BorderRadius} from '../../theme/colors';
+import {useShieldStatus} from '../../hooks/useShieldStatus';
 
 const {AppBlockModule, VpnModule} = NativeModules as any;
 const DNS_APPLIED_KEY = '@sentinela/dns_protection_applied';
 type DnsValidationState = 'idle' | 'checking' | 'verified' | 'failed';
 
-type ConfigTab = 'dns' | 'apps' | 'tasks';
+type ConfigTab = 'dns' | 'apps' | 'tasks' | 'manual';
 
 export default function ConfigScreen(): React.JSX.Element {
+  const route = useRoute<any>();
   const {showToast} = useToast();
   const {recordReviewSignal} = useReviewPrompt();
   const {
@@ -70,7 +85,12 @@ export default function ConfigScreen(): React.JSX.Element {
   const [dnsValidationState, setDnsValidationState] = useState<DnsValidationState>('idle');
   const [dnsValidationMessage, setDnsValidationMessage] = useState('');
   const [childId, setChildId] = useState<string>('local-child');
+  const [manualDomainInput, setManualDomainInput] = useState('');
+  const [blacklist, setBlacklist] = useState<string[]>([]);
+  const [whitelist, setWhitelist] = useState<string[]>([]);
+  const [isShieldLoading, setIsShieldLoading] = useState(false);
   const justOpenedAccessibilityRef = useRef<number>(0);
+  const {shieldStatus, refreshShieldStatus} = useShieldStatus();
 
   const refreshBlockingStatus = useCallback(() => {
     AppBlockModule?.isAccessibilityEnabled?.()
@@ -96,6 +116,25 @@ export default function ConfigScreen(): React.JSX.Element {
       .then(id => setChildId(id))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    getManualDomainLists()
+      .then(lists => {
+        setBlacklist(lists.blacklist);
+        setWhitelist(lists.whitelist);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const incomingTab = route.params?.initialTab as ConfigTab | undefined;
+    if (!incomingTab) {
+      return;
+    }
+    if (incomingTab === 'dns' || incomingTab === 'apps' || incomingTab === 'tasks' || incomingTab === 'manual') {
+      setTab(incomingTab);
+    }
+  }, [route.params?.initialTab]);
 
   useEffect(() => {
     refreshBlockingStatus();
@@ -248,6 +287,19 @@ export default function ConfigScreen(): React.JSX.Element {
       dohUrl,
     });
 
+    await setShieldProfile({
+      id: syncedProfile.id,
+      name: syncedProfile.name,
+      provider: syncedProfile.provider,
+      dotHost: syncedProfile.dotHost,
+      dohUrl: syncedProfile.dohUrl,
+      fallbackDnsIp: syncedProfile.fallbackDnsIp,
+    });
+    if (shieldStatus.enabled) {
+      await activateShield().catch(() => undefined);
+      await refreshShieldStatus();
+    }
+
     // Sem VPN: abre configurações de DNS Privado e copia hostname para clipboard
     await AppBlockModule?.copyToClipboard?.(dotHost)?.catch?.(() => undefined);
     await VpnModule?.openPrivateDnsSettings?.();
@@ -275,41 +327,117 @@ export default function ConfigScreen(): React.JSX.Element {
     recordReviewSignal('dns_private_configured').catch(() => undefined);
   };
 
-  const protectionActive = blockingEnabled && antiTampering;
+  const protectionActive = shieldStatus.enabled && shieldStatus.vpnActive;
+  const statusLabel = protectionActive ? 'Proteção Ativa' : 'Proteção Pausada';
+
+  const toggleShieldProtection = async (enabled: boolean) => {
+    if (isShieldLoading) {
+      return;
+    }
+    setIsShieldLoading(true);
+    try {
+      let result;
+      if (enabled) {
+        result = await activateShield();
+      } else {
+        result = await deactivateShield();
+      }
+      await refreshShieldStatus();
+      if (enabled && !result?.enabled) {
+        showToast({
+          kind: 'info',
+          title: 'Escudo indisponível neste dispositivo',
+          message: 'A proteção de rede nativa não está disponível neste sistema.',
+        });
+        return;
+      }
+      showToast({
+        kind: 'success',
+        title: enabled ? 'Escudo ativado' : 'Escudo pausado',
+      });
+    } catch (error) {
+      console.error('[Config] Shield toggle failed', {
+        enabled,
+        error,
+      });
+      showToast({
+        kind: 'error',
+        title: 'Não foi possível conectar ao Escudo',
+        message: 'Verifique sua internet e tente novamente.',
+      });
+    } finally {
+      setIsShieldLoading(false);
+    }
+  };
+
+  const addDomain = async (target: 'blacklist' | 'whitelist') => {
+    if (!manualDomainInput.trim()) {
+      showToast({kind: 'info', title: 'Digite um domínio válido'});
+      return;
+    }
+    const lists = await addDomainToList(manualDomainInput, target);
+    setBlacklist(lists.blacklist);
+    setWhitelist(lists.whitelist);
+    setManualDomainInput('');
+    await syncBlacklistToShield();
+  };
+
+  const removeDomain = async (target: 'blacklist' | 'whitelist', domain: string) => {
+    const lists = await removeDomainFromList(domain, target);
+    setBlacklist(lists.blacklist);
+    setWhitelist(lists.whitelist);
+    await syncBlacklistToShield();
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Configurações</Text>
-        <View
-          style={[
-            styles.statusPill,
-            protectionActive ? styles.statusPillActive : styles.statusPillPaused,
-          ]}>
+        <View style={styles.shieldRow}>
           <View
             style={[
-              styles.statusDot,
-              protectionActive ? styles.statusDotActive : styles.statusDotPaused,
-            ]}
-          />
-          <Text
-            style={[
-              styles.statusText,
-              protectionActive ? styles.statusTextActive : styles.statusTextPaused,
+              styles.statusPill,
+              protectionActive ? styles.statusPillActive : styles.statusPillPaused,
             ]}>
-            {protectionActive ? 'Conectado e Seguro' : 'Proteção Pausada'}
-          </Text>
+            <View
+              style={[
+                styles.statusDot,
+                protectionActive ? styles.statusDotActive : styles.statusDotPaused,
+              ]}
+            />
+            <Text
+              style={[
+                styles.statusText,
+                protectionActive ? styles.statusTextActive : styles.statusTextPaused,
+              ]}>
+              {statusLabel}
+            </Text>
+          </View>
+          <Switch
+            value={protectionActive}
+            onValueChange={toggleShieldProtection}
+            disabled={isShieldLoading}
+            trackColor={{false: '#FCA5A5', true: '#67E8F9'}}
+            thumbColor={protectionActive ? '#0EA5E9' : '#F97316'}
+          />
+          {isShieldLoading ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
         </View>
       </View>
 
       <View style={styles.tabs}>
-        {(['dns', 'apps', 'tasks'] as const).map(t => (
+        {(['dns', 'apps', 'tasks', 'manual'] as const).map(t => (
           <TouchableOpacity
             key={t}
             style={[styles.tab, tab === t && styles.tabActive]}
             onPress={() => setTab(t)}>
             <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'dns' ? 'DNS' : t === 'apps' ? 'Apps' : 'Tarefas'}
+              {t === 'dns'
+                ? 'DNS'
+                : t === 'apps'
+                  ? 'Apps'
+                  : t === 'tasks'
+                    ? 'Tarefas'
+                    : 'Manual'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -396,6 +524,68 @@ export default function ConfigScreen(): React.JSX.Element {
                 </View>
               ))
             )}
+          </View>
+        )}
+
+        {tab === 'manual' && (
+          <View style={styles.section}>
+            <Text style={styles.tasksSectionTitle}>Bloqueio manual</Text>
+            <Text style={styles.tasksSectionDesc}>
+              Adicione domínios específicos na lista negra ou branca.
+            </Text>
+            <View style={styles.manualInputWrap}>
+              <TextInput
+                style={styles.taskModalInput}
+                placeholder="Ex: tiktok.com"
+                placeholderTextColor={Colors.textMuted}
+                value={manualDomainInput}
+                onChangeText={setManualDomainInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <View style={styles.manualButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.taskModalBtn, styles.manualBlacklistBtn]}
+                  onPress={() => addDomain('blacklist')}>
+                  <Text style={styles.manualBtnText}>Adicionar à Lista Negra</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.taskModalBtn, styles.manualWhitelistBtn]}
+                  onPress={() => addDomain('whitelist')}>
+                  <Text style={styles.manualBtnText}>Adicionar à Lista Branca</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.manualListCard}>
+              <Text style={styles.manualListTitle}>Lista Negra</Text>
+              {blacklist.length === 0 ? (
+                <Text style={styles.tasksEmpty}>Sem domínios adicionados.</Text>
+              ) : (
+                blacklist.map(domain => (
+                  <View key={`black-${domain}`} style={styles.manualItemRow}>
+                    <Text style={styles.manualItemText}>{domain}</Text>
+                    <TouchableOpacity onPress={() => removeDomain('blacklist', domain)}>
+                      <Text style={styles.manualRemoveText}>🗑</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+            <View style={styles.manualListCard}>
+              <Text style={styles.manualListTitle}>Lista Branca</Text>
+              {whitelist.length === 0 ? (
+                <Text style={styles.tasksEmpty}>Sem domínios adicionados.</Text>
+              ) : (
+                whitelist.map(domain => (
+                  <View key={`white-${domain}`} style={styles.manualItemRow}>
+                    <Text style={styles.manualItemText}>{domain}</Text>
+                    <TouchableOpacity onPress={() => removeDomain('whitelist', domain)}>
+                      <Text style={styles.manualRemoveText}>🗑</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
           </View>
         )}
 
@@ -518,6 +708,12 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     paddingTop: Spacing.xxl,
   },
+  shieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
   title: {
     fontSize: 28,
     fontWeight: '700',
@@ -536,12 +732,12 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   statusPillActive: {
-    borderColor: Colors.mint,
-    backgroundColor: Colors.mintLight,
+    borderColor: '#22C55E',
+    backgroundColor: 'rgba(34,197,94,0.16)',
   },
   statusPillPaused: {
-    borderColor: Colors.childAmber,
-    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderColor: '#F97316',
+    backgroundColor: 'rgba(249,115,22,0.14)',
   },
   statusDot: {
     width: 8,
@@ -549,15 +745,15 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     marginRight: Spacing.sm,
   },
-  statusDotActive: {backgroundColor: Colors.mint},
-  statusDotPaused: {backgroundColor: Colors.childAmber},
+  statusDotActive: {backgroundColor: '#22C55E'},
+  statusDotPaused: {backgroundColor: '#F97316'},
   statusText: {
     fontSize: 13,
     fontWeight: '600',
     color: Colors.textSecondary,
   },
-  statusTextActive: {color: Colors.mint},
-  statusTextPaused: {color: Colors.childAmber},
+  statusTextActive: {color: '#16A34A'},
+  statusTextPaused: {color: '#C2410C'},
 
   tabs: {
     flexDirection: 'row',
@@ -567,7 +763,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    paddingVertical: Spacing.md,
+    paddingVertical: Spacing.sm,
     alignItems: 'center',
     borderRadius: 16,
     backgroundColor: Colors.border,
@@ -578,7 +774,7 @@ const styles = StyleSheet.create({
   tabText: {
     color: Colors.textSecondary,
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 13,
   },
   tabTextActive: {
     color: Colors.white,
@@ -637,9 +833,12 @@ const styles = StyleSheet.create({
   taskRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    marginBottom: Spacing.sm,
   },
   taskTitle: { fontSize: 16, fontWeight: '600', color: Colors.textPrimary },
   taskReward: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
@@ -694,5 +893,57 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textSecondary,
     lineHeight: 18,
+  },
+  manualInputWrap: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  manualButtonsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  manualBlacklistBtn: {
+    backgroundColor: '#DC2626',
+  },
+  manualWhitelistBtn: {
+    backgroundColor: '#059669',
+  },
+  manualBtnText: {
+    color: Colors.white,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  manualListCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  manualListTitle: {
+    color: Colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: Spacing.sm,
+  },
+  manualItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  manualItemText: {
+    color: Colors.textSecondary,
+    flex: 1,
+    marginRight: Spacing.md,
+  },
+  manualRemoveText: {
+    fontSize: 18,
   },
 });

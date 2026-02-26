@@ -3,7 +3,7 @@
  */
 
 import React, {useEffect} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text} from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -28,7 +28,9 @@ export default function ProtectionLevelBadge({
   const scale = useSharedValue(1);
 
   useEffect(() => {
-    if (!animated) return;
+    if (!animated) {
+      return;
+    }
     scale.value = withRepeat(
       withSequence(
         withTiming(1.02, {duration: 800}),
@@ -37,7 +39,7 @@ export default function ProtectionLevelBadge({
       -1,
       true,
     );
-  }, [animated]);
+  }, [animated, scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{scale: scale.value}],

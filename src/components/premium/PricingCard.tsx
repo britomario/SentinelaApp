@@ -1,5 +1,6 @@
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {BorderRadius, Colors, Shadows, Spacing} from '../../theme/colors';
 
 type PricingCardProps = {
   annualPrice: number;
@@ -41,19 +42,20 @@ export default function PricingCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 20,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
     borderWidth: 1,
     borderColor: '#DBEAFE',
+    ...Shadows.low,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0F172A',
+    color: Colors.textPrimary,
   },
   value: {
-    marginTop: 8,
+    marginTop: Spacing.sm,
     fontSize: 34,
     fontWeight: '800',
     color: '#0066CC',
@@ -64,19 +66,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   subtitle: {
-    marginTop: 12,
-    color: '#475569',
+    marginTop: Spacing.sm,
+    color: Colors.textSecondary,
     lineHeight: 20,
   },
   highlight: {
-    marginTop: 8,
-    color: '#1E293B',
+    marginTop: Spacing.sm,
+    color: Colors.textPrimary,
     fontWeight: '600',
   },
   button: {
-    marginTop: 16,
-    backgroundColor: '#0066CC',
-    borderRadius: 12,
+    marginTop: Spacing.md,
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.sm,
     paddingVertical: 13,
     alignItems: 'center',
   },

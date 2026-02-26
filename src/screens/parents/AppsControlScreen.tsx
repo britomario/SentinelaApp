@@ -164,8 +164,8 @@ export default function AppsControlScreen(): React.JSX.Element {
         {creditsLoading ? (
           <View style={styles.card}>
             <Skeleton width="55%" />
-            <Skeleton width="100%" style={{marginTop: 8}} />
-            <Skeleton width="82%" style={{marginTop: 8}} />
+            <Skeleton width="100%" style={styles.skeletonSpacer8} />
+            <Skeleton width="82%" style={styles.skeletonSpacer8} />
           </View>
         ) : creditsApps.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -180,8 +180,13 @@ export default function AppsControlScreen(): React.JSX.Element {
                 key={app.packageName}
                 style={styles.appRow}
                 onPress={() => handleAppPress(app)}>
-                <AppIcon name={app.displayName} size={24} iconUri={app.iconUri} style={{marginRight: Spacing.sm}} />
-                <View style={{flex: 1}}>
+                <AppIcon
+                  name={app.displayName}
+                  size={24}
+                  iconUri={app.iconUri}
+                  style={styles.appIconWrapper}
+                />
+                <View style={styles.appRowContent}>
                   <Text style={styles.appName}>{app.displayName}</Text>
                   <Text style={styles.appLimit}>{app.dailyLimitMinutes ?? 60} min/dia</Text>
                 </View>
@@ -252,7 +257,7 @@ const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.background},
   scrollContent: {padding: Spacing.lg, paddingBottom: Spacing.xxl},
   headerRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'},
-  title: {fontSize: 24, fontWeight: '700', color: Colors.textPrimary},
+  title: {fontSize: 26, fontWeight: '800', color: Colors.textPrimary},
   help: {color: Colors.primary, fontWeight: '700'},
   section: {marginTop: Spacing.md},
   sectionTitle: {fontSize: 18, fontWeight: '700', color: Colors.textPrimary, marginTop: Spacing.md},
@@ -266,21 +271,36 @@ const styles = StyleSheet.create({
   emptyText: {fontSize: 15, color: Colors.textSecondary, textAlign: 'center'},
   card: {
     backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.xl,
+    borderRadius: BorderRadius.xxl,
     padding: Spacing.md,
-    ...Shadows.low,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.soft,
   },
   appRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#F8FAFF',
+    marginBottom: Spacing.sm,
   },
   appIconWrapper: {marginRight: Spacing.sm},
+  appRowContent: {flex: 1},
+  skeletonSpacer8: {marginTop: 8},
   appName: {fontSize: 15, fontWeight: '600', color: Colors.textPrimary},
   appLimit: {fontSize: 13, color: Colors.textSecondary, marginTop: 2},
-  toggleRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'},
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#ECFEFF',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+    borderWidth: 1,
+    borderColor: '#A5F3FC',
+  },
   toggleLabel: {fontSize: 15, color: Colors.textPrimary, fontWeight: '600'},
   modalOverlay: {
     flex: 1,

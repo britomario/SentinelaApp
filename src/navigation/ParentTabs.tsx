@@ -8,13 +8,14 @@ import {StyleSheet, View} from 'react-native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {
   Home,
+  MapPin,
   LayoutGrid,
   Settings,
   Star,
-  Link2,
-  Users,
+  Tablet,
+  ChessKnight,
+  Baby,
   Lock,
-  Moon,
 } from 'lucide-react-native';
 
 import DashboardScreen from '../screens/parents/DashboardScreen';
@@ -24,7 +25,8 @@ import ChildRestrictedScreen from '../screens/child/ChildRestrictedScreen';
 import PremiumScreen from '../screens/PremiumScreen';
 import PairingScreen from '../screens/parents/PairingScreen';
 import ConfigScreen from '../screens/parents/ConfigScreen';
-import RestModeScreen from '../screens/RestModeScreen';
+import ChildrenManagementScreen from '../screens/parents/ChildrenManagementScreen';
+import MapScreen from '../screens/parents/MapScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -43,13 +45,11 @@ export default function ParentTabs(): React.JSX.Element {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarScrollEnabled: true,
         tabBarActiveTintColor: '#0066CC',
         tabBarInactiveTintColor: '#94A3B8',
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: '600',
-          allowFontScaling: false,
         },
         tabBarItemStyle: {
           paddingVertical: 4,
@@ -74,6 +74,11 @@ export default function ParentTabs(): React.JSX.Element {
         options={{tabBarLabel: 'Início', tabBarIcon: makeTabIcon(Home)}}
       />
       <Tab.Screen
+        name="Mapa"
+        component={MapScreen}
+        options={{tabBarLabel: 'Mapa', tabBarIcon: makeTabIcon(MapPin)}}
+      />
+      <Tab.Screen
         name="Apps"
         component={AppsControlScreen}
         options={{tabBarLabel: 'Apps', tabBarIcon: makeTabIcon(LayoutGrid)}}
@@ -91,17 +96,17 @@ export default function ParentTabs(): React.JSX.Element {
       <Tab.Screen
         name="Parear"
         component={PairingScreen}
-        options={{tabBarLabel: 'Parear', tabBarIcon: makeTabIcon(Link2)}}
+        options={{tabBarLabel: 'Parear', tabBarIcon: makeTabIcon(Tablet)}}
+      />
+      <Tab.Screen
+        name="Filhos"
+        component={ChildrenManagementScreen}
+        options={{tabBarLabel: 'Filhos', tabBarIcon: makeTabIcon(Baby)}}
       />
       <Tab.Screen
         name="ChildMode"
         component={ChildModeScreen}
-        options={{tabBarLabel: 'Espaço', tabBarIcon: makeTabIcon(Users)}}
-      />
-      <Tab.Screen
-        name="RestMode"
-        component={RestModeScreen}
-        options={{tabBarLabel: 'Dormir', tabBarIcon: makeTabIcon(Moon)}}
+        options={{tabBarLabel: 'Espaço', tabBarIcon: makeTabIcon(ChessKnight)}}
       />
       <Tab.Screen
         name="ChildLock"

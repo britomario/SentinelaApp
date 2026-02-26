@@ -1,13 +1,12 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
-  FlatList,
-  Modal,
+  ActivityIndicator,
   NativeModules,
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -16,7 +15,6 @@ import {useNavigation} from '@react-navigation/native';
 
 import GuidedTourOverlay from '../../components/tour/GuidedTourOverlay';
 import type {TourAnchor} from '../../components/tour/GuidedTourOverlay';
-import AppIcon from '../../components/apps/AppIcon';
 import Skeleton from '../../components/feedback/Skeleton';
 import {useToast} from '../../components/feedback/ToastProvider';
 import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
@@ -24,23 +22,12 @@ import {analyzeOnDevice} from '../../ai/onDeviceNlp';
 import {getCurrentChildId} from '../../services/currentChildService';
 import {hasSeenTour, markTourSeen} from '../../services/onboardingState';
 import {sendGuardianAlert} from '../../services/notifications/oneSignalService';
-import {dispatchQuickAction} from '../../services/quickActionsDispatchService';
-import {executeQuickActionLocally} from '../../services/quickActionsLocalExecutor';
 import {subscribeToChildLocation} from '../../services/realtime/socketService';
+import {useShieldStatus} from '../../hooks/useShieldStatus';
+import {toggleShield} from '../../services/shieldService';
 import {BorderRadius, Colors, Shadows, Spacing} from '../../theme/colors';
 
 const {AppBlockModule} = NativeModules as any;
-
-const QUICK_ACTIONS: Array<{
-  id: string;
-  label: string;
-  icon: string;
-  action: import('../../services/quickActionsDispatchService').QuickActionType;
-}> = [
-  {id: '1', label: 'Bloquear Agora', icon: '⏸️', action: 'block_now'},
-  {id: '2', label: 'Adicionar 30min', icon: '➕', action: 'grant_time'},
-  {id: '3', label: 'Ver Tela Ao Vivo', icon: '📺', action: 'live_screen_request'},
-];
 
 const WEEK_DATA = [
   {day: 'Seg', minutes: 0},
@@ -51,28 +38,6 @@ const WEEK_DATA = [
   {day: 'Sab', minutes: 0},
   {day: 'Dom', minutes: 0},
 ];
-
-function QuickActionButton({
-  quickAction,
-  onPress,
-  loading,
-}: {
-  quickAction: (typeof QUICK_ACTIONS)[0];
-  onPress: () => void;
-  loading: boolean;
-}): React.JSX.Element {
-  return (
-    <TouchableOpacity
-      style={styles.actionBtn}
-      onPress={onPress}
-      disabled={loading}>
-      <Text style={styles.actionIcon}>{quickAction.icon}</Text>
-      <Text style={styles.actionLabel}>
-        {loading ? 'Enviando...' : quickAction.label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
 
 const DASHBOARD_TOUR = [
   {
@@ -85,28 +50,12 @@ const DASHBOARD_TOUR = [
     title: 'Clima emocional',
     description: 'Este card resume sinais de bem-estar processados localmente no aparelho.',
   },
-  {
-    anchorKey: 'actions',
-    title: 'Acoes rapidas',
-    description: 'Use estes atalhos para agir imediatamente em situacoes de risco.',
-  },
 ];
 
 export default function DashboardScreen(): React.JSX.Element {
   const navigation = useNavigation<any>();
   const {showToast} = useToast();
   const {recordReviewSignal} = useReviewPrompt();
-  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
-  const [actionModalVisible, setActionModalVisible] = useState(false);
-  const [actionSearch, setActionSearch] = useState('');
-  const [selectedAction, setSelectedAction] = useState<
-    import('../../services/quickActionsDispatchService').QuickActionType | null
-  >(null);
-  const [selectedPackages, setSelectedPackages] = useState<Set<string>>(new Set());
-  const [installedApps, setInstalledApps] = useState<
-    Array<{packageName: string; label: string; iconUri?: string}>
-  >([]);
-  const [loadingApps, setLoadingApps] = useState(false);
   const [usageWeek, setUsageWeek] = useState(WEEK_DATA);
   const [usageApps, setUsageApps] = useState<
     Array<{packageName: string; label: string; minutes: number; iconUri?: string}>
@@ -117,6 +66,7 @@ export default function DashboardScreen(): React.JSX.Element {
   const [tourVisible, setTourVisible] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [tourAnchors, setTourAnchors] = useState<Record<string, TourAnchor>>({});
+  const [isShieldLoading, setIsShieldLoading] = useState(false);
   const [childLocation, setChildLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -127,19 +77,7 @@ export default function DashboardScreen(): React.JSX.Element {
   const staleLocationAlertSent = useRef(false);
   const headerRef = useRef<View>(null);
   const climateRef = useRef<View>(null);
-  const actionsRef = useRef<View>(null);
-
-  const filteredApps = useMemo(() => {
-    const q = actionSearch.trim().toLowerCase();
-    if (!q) {
-      return installedApps;
-    }
-    return installedApps.filter(
-      app =>
-        app.label.toLowerCase().includes(q) ||
-        app.packageName.toLowerCase().includes(q),
-    );
-  }, [actionSearch, installedApps]);
+  const {shieldStatus, refreshShieldStatus} = useShieldStatus();
 
   useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 850);
@@ -175,7 +113,6 @@ export default function DashboardScreen(): React.JSX.Element {
     const items: Array<{key: string; ref: React.RefObject<View>}> = [
       {key: 'header', ref: headerRef},
       {key: 'climate', ref: climateRef},
-      {key: 'actions', ref: actionsRef},
     ];
     items.forEach(item => {
       item.ref.current?.measureInWindow((x, y, width, height) => {
@@ -210,7 +147,7 @@ export default function DashboardScreen(): React.JSX.Element {
 
   const maxUsage = Math.max(1, ...usageWeek.map(d => d.minutes));
   const climateEmoji = climate.wellbeing.level === 'green' ? '😊' : '🙂';
-  const climateColor = climate.wellbeing.level === 'green' ? Colors.mint : '#F59E0B';
+  const shieldActive = shieldStatus.enabled && shieldStatus.vpnActive;
 
   useEffect(() => {
     if (isLoading) {
@@ -310,93 +247,39 @@ export default function DashboardScreen(): React.JSX.Element {
     loadUsage().catch(() => undefined);
   }, []);
 
-  const runQuickAction = async (
-    action: import('../../services/quickActionsDispatchService').QuickActionType,
-    packages: string[] = [],
-  ) => {
-    setActionLoading(prev => ({...prev, [action]: true}));
-    const result = await dispatchQuickAction(action, childId);
-    const localExecuted = result.ok
-      ? await executeQuickActionLocally(action, {packages})
-      : false;
-    setActionLoading(prev => ({...prev, [action]: false}));
-    if (result.ok) {
+  const onToggleShield = async (enabled: boolean) => {
+    if (isShieldLoading) {
+      return;
+    }
+    setIsShieldLoading(true);
+    try {
+      const result = await toggleShield(enabled);
+      await refreshShieldStatus();
+      if (enabled && !result.enabled) {
+        showToast({
+          kind: 'info',
+          title: 'Escudo não suportado',
+          message: 'Este dispositivo ainda não possui ativação nativa disponível.',
+        });
+        return;
+      }
       showToast({
         kind: 'success',
-        title: 'Ação executada',
-        message: localExecuted
-          ? 'Aplicada ao(s) app(s) selecionado(s).'
-          : result.localOnly
-            ? 'Ação registrada localmente.'
-            : 'Comando encaminhado ao dispositivo monitorado.',
+        title: enabled ? 'Escudo ativo' : 'Proteção pausada',
       });
-      return;
-    }
-    showToast({
-      kind: 'error',
-      title: 'Falha ao enviar',
-      message:
-        result.reason === 'api_not_configured'
-          ? 'Configure SYNC_API_BASE_URL para uso remoto.'
-          : 'Tente novamente em instantes.',
-    });
-  };
-
-  const openQuickAction = async (
-    action: import('../../services/quickActionsDispatchService').QuickActionType,
-  ) => {
-    if (action === 'live_screen_request') {
-      await runQuickAction(action);
-      return;
-    }
-    setSelectedAction(action);
-    setActionSearch('');
-    setSelectedPackages(new Set());
-    setActionModalVisible(true);
-    setLoadingApps(true);
-    try {
-      const raw = AppBlockModule?.getInstalledApps
-        ? await AppBlockModule.getInstalledApps()
-        : [];
-      const list = Array.isArray(raw)
-        ? raw.map((a: {packageName?: string; label?: string; iconUri?: string}) => ({
-            packageName: a.packageName ?? '',
-            label: a.label ?? a.packageName ?? '',
-            iconUri: a.iconUri ?? undefined,
-          }))
-        : [];
-      list.sort((a, b) =>
-        a.label.localeCompare(b.label, undefined, {sensitivity: 'base'}),
-      );
-      setInstalledApps(list);
+    } catch (error) {
+      console.error('[Dashboard] Shield toggle failed', {
+        enabled,
+        error,
+      });
+      showToast({
+        kind: 'error',
+        title: 'Não foi possível conectar ao Escudo',
+        message: 'Verifique sua internet e tente novamente.',
+      });
     } finally {
-      setLoadingApps(false);
+      setIsShieldLoading(false);
     }
-  };
-
-  const toggleSelectedPackage = (pkg: string) => {
-    setSelectedPackages(prev => {
-      const next = new Set(prev);
-      if (next.has(pkg)) {
-        next.delete(pkg);
-      } else {
-        next.add(pkg);
-      }
-      return next;
-    });
-  };
-
-  const confirmQuickActionSelection = async () => {
-    if (!selectedAction) {
-      return;
-    }
-    const packages = Array.from(selectedPackages);
-    if (packages.length === 0) {
-      showToast({kind: 'error', title: 'Selecione pelo menos um app'});
-      return;
-    }
-    setActionModalVisible(false);
-    await runQuickAction(selectedAction, packages);
   };
 
   return (
@@ -418,18 +301,59 @@ export default function DashboardScreen(): React.JSX.Element {
       />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header} ref={headerRef}>
-          <View>
+          <View style={styles.headerInfo}>
             <Text style={styles.greeting}>Ola, Maria</Text>
             <Text style={styles.subGreeting}>Visao geral da seguranca</Text>
+            <View
+              style={[
+                styles.shieldPill,
+                shieldActive ? styles.shieldPillActive : styles.shieldPillPaused,
+              ]}>
+              <View
+                style={[
+                  styles.shieldDot,
+                  shieldActive ? styles.shieldDotActive : styles.shieldDotPaused,
+                ]}
+              />
+              <Text
+                style={[
+                  styles.shieldText,
+                  shieldActive ? styles.shieldTextActive : styles.shieldTextPaused,
+                ]}>
+                {shieldActive ? 'Proteção Ativa' : 'Proteção Pausada'}
+              </Text>
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.helpButton}
-            onPress={() => {
-              setTourStep(0);
-              setTourVisible(true);
-            }}>
-            <Text style={styles.helpButtonText}>?</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <Switch
+              value={shieldActive}
+              onValueChange={onToggleShield}
+              disabled={isShieldLoading}
+              trackColor={{false: '#FCA5A5', true: '#86EFAC'}}
+              thumbColor={shieldActive ? '#16A34A' : '#F97316'}
+            />
+            {isShieldLoading ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : null}
+            <TouchableOpacity
+              style={styles.helpButton}
+              onPress={() => {
+                setTourStep(0);
+                setTourVisible(true);
+              }}>
+              <Text style={styles.helpButtonText}>?</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <View style={styles.section}>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Escudo Principal</Text>
+            <Text style={styles.cardDesc}>
+              {shieldActive
+                ? 'Tráfego protegido por DNS filtrado e bloqueio em tempo real.'
+                : 'Ative o escudo para forçar proteção de rede e bloquear conteúdo sensível.'}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.section} ref={climateRef}>
@@ -437,7 +361,7 @@ export default function DashboardScreen(): React.JSX.Element {
             {isLoading ? (
               <>
                 <Skeleton height={140} radius={16} />
-                <Skeleton width="68%" style={{marginTop: 10}} />
+                <Skeleton width="68%" style={styles.skeletonSpacer10} />
               </>
             ) : (
               <>
@@ -487,13 +411,18 @@ export default function DashboardScreen(): React.JSX.Element {
             {isLoading ? (
               <>
                 <Skeleton width="45%" height={18} />
-                <Skeleton width="100%" style={{marginTop: 10}} />
-                <Skeleton width="70%" style={{marginTop: 8}} />
+                <Skeleton width="100%" style={styles.skeletonSpacer10} />
+                <Skeleton width="70%" style={styles.skeletonSpacer8} />
               </>
             ) : (
               <>
                 <Text style={styles.cardTitle}>Clima Emocional {climateEmoji}</Text>
-                <Text style={[styles.score, {color: climateColor}]}>
+                <Text
+                  style={
+                    climate.wellbeing.level === 'green'
+                      ? styles.scoreGreen
+                      : styles.scoreAmber
+                  }>
                   Score de bem-estar: {climate.wellbeing.score}/100
                 </Text>
                 <Text style={styles.cardDesc}>{climate.summary}</Text>
@@ -540,82 +469,7 @@ export default function DashboardScreen(): React.JSX.Element {
           </View>
         </View>
 
-        <View style={styles.section} ref={actionsRef}>
-          <Text style={styles.sectionTitle}>Acoes rapidas</Text>
-          <View style={styles.actionsGrid}>
-            {QUICK_ACTIONS.map(quickAction => (
-              <QuickActionButton
-                key={quickAction.id}
-                quickAction={quickAction}
-                loading={!!actionLoading[quickAction.action]}
-                onPress={() => {
-                  openQuickAction(quickAction.action).catch(() =>
-                    showToast({
-                      kind: 'error',
-                      title: 'Falha ao carregar apps',
-                    }),
-                  );
-                }}
-              />
-            ))}
-          </View>
-        </View>
       </ScrollView>
-
-      <Modal visible={actionModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              {selectedAction === 'block_now'
-                ? 'Bloquear agora: selecionar apps'
-                : 'Adicionar 30 min: selecionar apps'}
-            </Text>
-            <TextInput
-              style={styles.modalSearch}
-              value={actionSearch}
-              onChangeText={setActionSearch}
-              placeholder="Pesquisar app..."
-              placeholderTextColor={Colors.textMuted}
-            />
-            {loadingApps ? (
-              <Text style={styles.modalHint}>Carregando apps...</Text>
-            ) : (
-              <FlatList
-                data={filteredApps}
-                keyExtractor={item => item.packageName}
-                style={styles.modalList}
-                renderItem={({item}) => (
-                  <TouchableOpacity
-                    style={styles.modalRow}
-                    onPress={() => toggleSelectedPackage(item.packageName)}>
-                    <AppIcon name={item.label} iconUri={item.iconUri} size={32} />
-                    <Text style={styles.modalRowText} numberOfLines={1}>
-                      {item.label}
-                    </Text>
-                    <Text style={styles.modalCheck}>
-                      {selectedPackages.has(item.packageName) ? '✓' : '+'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              />
-            )}
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => setActionModalVisible(false)}>
-                <Text style={styles.modalBtnCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnConfirm]}
-                onPress={() => {
-                  confirmQuickActionSelection().catch(() => undefined);
-                }}>
-                <Text style={styles.modalBtnConfirmText}>Confirmar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -630,8 +484,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
   },
+  headerInfo: {flex: 1},
+  headerActions: {alignItems: 'center', gap: Spacing.sm},
   greeting: {fontSize: 24, fontWeight: '700', color: Colors.textPrimary},
   subGreeting: {fontSize: 14, color: Colors.textSecondary, marginTop: 2},
+  shieldPill: {
+    marginTop: Spacing.sm,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BorderRadius.full,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+  },
+  shieldPillActive: {
+    borderColor: '#22C55E',
+    backgroundColor: 'rgba(34,197,94,0.16)',
+  },
+  shieldPillPaused: {
+    borderColor: '#F97316',
+    backgroundColor: 'rgba(249,115,22,0.14)',
+  },
+  shieldDot: {width: 8, height: 8, borderRadius: 4, marginRight: 8},
+  shieldDotActive: {backgroundColor: '#16A34A'},
+  shieldDotPaused: {backgroundColor: '#EA580C'},
+  shieldText: {fontSize: 12, fontWeight: '700'},
+  shieldTextActive: {color: '#15803D'},
+  shieldTextPaused: {color: '#C2410C'},
   helpButton: {
     width: 36,
     height: 36,
@@ -658,6 +538,10 @@ const styles = StyleSheet.create({
   cardDesc: {fontSize: 14, color: Colors.textSecondary, marginTop: 6, lineHeight: 20},
   map: {marginTop: 10, width: '100%', height: 170, borderRadius: 12},
   score: {marginTop: 8, fontWeight: '700'},
+  scoreGreen: {marginTop: 8, fontWeight: '700' as const, color: Colors.mint},
+  scoreAmber: {marginTop: 8, fontWeight: '700' as const, color: '#F59E0B'},
+  skeletonSpacer10: {marginTop: 10},
+  skeletonSpacer8: {marginTop: 8},
   chartRow: {
     marginTop: 12,
     height: 112,

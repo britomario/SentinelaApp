@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import {useNavigation} from '@react-navigation/native';
 
 import {useToast} from '../../components/feedback/ToastProvider';
 import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
@@ -11,15 +12,30 @@ import {
   PairingPayload,
   storeParentPairingToken,
 } from '../../services/pairingService';
+import {
+  getChildrenProfiles,
+  MAX_CHILDREN_PROFILES,
+} from '../../services/childrenProfilesService';
 
 export default function PairingScreen(): React.JSX.Element {
+  const navigation = useNavigation<any>();
   const {showToast} = useToast();
   const {recordReviewSignal} = useReviewPrompt();
   const [payload, setPayload] = useState<PairingPayload | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [childrenCount, setChildrenCount] = useState(0);
 
   const issueNewPairingCode = useCallback(async (): Promise<void> => {
+    const profiles = await getChildrenProfiles();
+    if (profiles.length >= MAX_CHILDREN_PROFILES) {
+      showToast({
+        kind: 'info',
+        title: 'Limite de perfis atingido',
+        message: `Máximo de ${MAX_CHILDREN_PROFILES} filhos/dispositivos nesta versão.`,
+      });
+      return;
+    }
     setBusy(true);
     try {
       await initializeOneSignal();
@@ -52,6 +68,12 @@ export default function PairingScreen(): React.JSX.Element {
   }, [issueNewPairingCode]);
 
   useEffect(() => {
+    getChildrenProfiles()
+      .then(profiles => setChildrenCount(profiles.length))
+      .catch(() => setChildrenCount(0));
+  }, []);
+
+  useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -69,6 +91,14 @@ export default function PairingScreen(): React.JSX.Element {
       <Text style={styles.subtitle}>
         Este QR contem o link para loja e um token temporario seguro para vincular o app da crianca ao seu modo parental.
       </Text>
+      <View style={styles.limitPill}>
+        <Text style={styles.limitPillText}>
+          Perfis conectados: {childrenCount}/{MAX_CHILDREN_PROFILES}
+        </Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Filhos')}>
+          <Text style={styles.limitPillLink}>Gerenciar</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.qrCard}>
         {payload ? (
@@ -121,6 +151,29 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: '#475569',
     lineHeight: 20,
+  },
+  limitPill: {
+    marginTop: 12,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  limitPillText: {
+    color: '#312E81',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  limitPillLink: {
+    color: '#2563EB',
+    fontWeight: '700',
+    fontSize: 12,
   },
   qrCard: {
     marginTop: 16,

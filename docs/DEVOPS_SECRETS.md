@@ -88,7 +88,7 @@ Se não quiser usar react-native-config, injete variáveis em `metro.config.js` 
 |----------|-------------|-----------|
 | `ONESIGNAL_REST_API_KEY` | Sim (dispatch) | REST API Key OneSignal |
 | `ONESIGNAL_APP_ID` | Sim | App ID OneSignal |
-| `REVENUECAT_WEBHOOK_SECRET` | Sim (webhook) | Webhook secret RevenueCat para validar assinatura |
+| `REVENUECAT_WEBHOOK_SECRET` | Sim (webhook) | Token usado no header `Authorization: Bearer <token>` do webhook RevenueCat |
 | `SUPABASE_SERVICE_ROLE_KEY` | Sim (API server) | Service role para upserts server-side (obrigatório; não usar ANON_KEY) |
 | `SUPABASE_URL` | Sim | URL do projeto Supabase |
 | `NEXTDNS_PROFILE_ID` | Sim (DNS real) | Perfil que será aplicado aos dispositivos |
@@ -104,7 +104,7 @@ Configure em **Project Settings > Environment Variables** antes do deploy:
 | `SUPABASE_SERVICE_ROLE_KEY` | _supabaseServer | Chave service role (nunca anon) |
 | `ONESIGNAL_APP_ID` | alerts/dispatch | App ID OneSignal |
 | `ONESIGNAL_REST_API_KEY` | alerts/dispatch | REST API Key OneSignal |
-| `REVENUECAT_WEBHOOK_SECRET` | revenuecat/webhook | Secret do webhook; sem ele o webhook aceita qualquer requisição |
+| `REVENUECAT_WEBHOOK_SECRET` | revenuecat/webhook | Token Bearer obrigatório; configure no RevenueCat o header `Authorization: Bearer <token>` |
 | `NEXTDNS_PROFILE_ID` | dns/profile-sync | ID do perfil NextDNS |
 | `NEXTDNS_API_KEY` | dns/profile-sync | API Key da conta NextDNS |
 
@@ -142,4 +142,4 @@ Para builds CI que precisam de credenciais (ex: release signing):
 - [ ] `.env.example` atualizado sem valores reais
 - [ ] Secrets configurados no provedor (GitHub/Vercel)
 - [ ] Staging e prod com projetos separados
-- [ ] RevenueCat webhook configurado para produção
+- [ ] RevenueCat webhook configurado para produção com header `Authorization: Bearer <token>`

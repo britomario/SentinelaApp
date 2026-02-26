@@ -5,7 +5,7 @@ const CAROUSEL_DONE_KEY = 'sentinela.onboarding.carousel_done';
 const LINKED_PROVIDER_KEY = 'sentinela.onboarding.linkedProvider';
 const TOUR_PREFIX = 'sentinela.tour.';
 
-export type LinkedProvider = 'google' | 'apple' | 'manual';
+export type LinkedProvider = 'google' | 'apple' | 'facebook' | 'manual';
 
 export async function isCarouselCompleted(): Promise<boolean> {
   const value = await AsyncStorage.getItem(CAROUSEL_DONE_KEY);
@@ -30,7 +30,7 @@ export async function completeOnboarding(provider: LinkedProvider): Promise<void
 
 export async function getLinkedProvider(): Promise<LinkedProvider | null> {
   const provider = await AsyncStorage.getItem(LINKED_PROVIDER_KEY);
-  if (provider === 'google' || provider === 'apple' || provider === 'manual') {
+  if (provider === 'google' || provider === 'apple' || provider === 'facebook' || provider === 'manual') {
     return provider;
   }
   return null;

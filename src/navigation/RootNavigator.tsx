@@ -11,7 +11,6 @@ import ParentTabs from './ParentTabs';
 import PinSetupScreen from '../screens/PinSetupScreen';
 import WelcomeScreen from '../screens/WelcomeScreen';
 import OnboardingCarousel from '../screens/OnboardingCarousel';
-import RestModeScreen from '../screens/RestModeScreen';
 import UsageDetailsScreen from '../screens/parents/UsageDetailsScreen';
 import {isOnboardingDone, isCarouselCompleted} from '../services/onboardingState';
 
@@ -62,7 +61,6 @@ export default function RootNavigator(): React.JSX.Element {
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
         <Stack.Screen name="PinSetup" component={PinSetupScreen} />
         <Stack.Screen name="Main" component={ParentTabs} />
-        <Stack.Screen name="RestMode" component={RestModeScreen} />
         <Stack.Screen name="UsageDetails" component={UsageDetailsScreen} />
       </Stack.Navigator>
     </NavigationContainer>

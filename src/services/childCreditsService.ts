@@ -20,7 +20,7 @@ export type ChildCreditsApp = {
 async function getLocalCreditsApps(): Promise<ChildCreditsApp[]> {
   try {
     const raw = await AsyncStorage.getItem(CREDITS_APPS_KEY);
-    if (!raw) return [];
+    if (!raw) {return [];}
     const parsed = JSON.parse(raw) as ChildCreditsApp[];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -63,7 +63,7 @@ export async function getChildCreditsApps(): Promise<ChildCreditsApp[]> {
 
 async function fetchCreditsAppsFromSupabase(): Promise<ChildCreditsApp[]> {
   const supabase = getSupabaseClient();
-  if (!supabase) return [];
+  if (!supabase) {return [];}
 
   try {
     const deviceId = await getOrCreateDeviceId();
@@ -73,7 +73,7 @@ async function fetchCreditsAppsFromSupabase(): Promise<ChildCreditsApp[]> {
       .eq('device_id', deviceId)
       .order('created_at', {ascending: true});
 
-    if (error) return [];
+    if (error) {return [];}
     return (data ?? []).map((r: {
       package_name: string;
       display_name: string;
@@ -92,7 +92,7 @@ async function fetchCreditsAppsFromSupabase(): Promise<ChildCreditsApp[]> {
 
 export async function addChildCreditsApp(app: ChildCreditsApp): Promise<void> {
   const local = await getLocalCreditsApps();
-  if (local.some(a => a.packageName === app.packageName)) return;
+  if (local.some(a => a.packageName === app.packageName)) {return;}
 
   const next = [...local, { ...app, dailyLimitMinutes: app.dailyLimitMinutes ?? 0 }];
   await setLocalCreditsApps(next);
@@ -113,7 +113,7 @@ async function syncCreditsAppToSupabase(
   action: 'add' | 'remove',
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) {return;}
 
   try {
     const deviceId = await getOrCreateDeviceId();
@@ -129,14 +129,14 @@ async function syncCreditsAppToSupabase(
         },
         { onConflict: 'device_id,package_name' },
       );
-      if (error) throw error;
+      if (error) {throw error;}
     } else {
       const {error} = await supabase
         .from('child_credits_apps')
         .delete()
         .eq('device_id', deviceId)
         .eq('package_name', app.packageName);
-      if (error) throw error;
+      if (error) {throw error;}
     }
   } catch (error) {
     throw new Error(
@@ -153,13 +153,13 @@ export async function updateCreditsAppLimit(
 ): Promise<void> {
   const local = await getLocalCreditsApps();
   const idx = local.findIndex(a => a.packageName === packageName);
-  if (idx < 0) return;
+  if (idx < 0) {return;}
   local[idx].dailyLimitMinutes = dailyLimitMinutes;
   await setLocalCreditsApps(local);
   notifyCreditsAppsChanged();
 
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) {return;}
   try {
     const deviceId = await getOrCreateDeviceId();
     const {error} = await supabase
@@ -167,7 +167,7 @@ export async function updateCreditsAppLimit(
       .update({ daily_limit_minutes: dailyLimitMinutes })
       .eq('device_id', deviceId)
       .eq('package_name', packageName);
-    if (error) throw error;
+    if (error) {throw error;}
   } catch (error) {
     throw new Error(
       `Falha ao atualizar limite diario: ${

@@ -10,7 +10,7 @@ export async function syncAppPolicyToSupabase(
   blockedPackages: string[],
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) {return;}
 
   try {
     const deviceId = await getOrCreateDeviceId();
@@ -52,7 +52,7 @@ export async function syncAppPolicyToSupabase(
 
 export async function fetchAppPolicyFromSupabase(): Promise<Set<string> | null> {
   const supabase = getSupabaseClient();
-  if (!supabase) return null;
+  if (!supabase) {return null;}
 
   try {
     const deviceId = await getOrCreateDeviceId();
@@ -62,7 +62,7 @@ export async function fetchAppPolicyFromSupabase(): Promise<Set<string> | null> 
       .eq('device_id', deviceId)
       .eq('allowed', false);
 
-    if (error) return null;
+    if (error) {return null;}
     return new Set((data ?? []).map((r: {package_name: string}) => r.package_name));
   } catch {
     return null;

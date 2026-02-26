@@ -35,7 +35,7 @@ export default function AppList({
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return apps;
+    if (!search.trim()) {return apps;}
     const q = search.trim().toLowerCase();
     return apps.filter(
       a => a.label.toLowerCase().includes(q) || a.packageName.toLowerCase().includes(q),

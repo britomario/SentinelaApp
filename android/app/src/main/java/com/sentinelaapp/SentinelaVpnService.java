@@ -67,6 +67,7 @@ public class SentinelaVpnService extends VpnService {
 
     private static final String VPN_ADDRESS  = "10.0.0.2";
     private static volatile String sUpstreamDns = "8.8.8.8";
+    private static volatile String sNextDnsDotHost = "";
     private static final int    DNS_PORT     = 53;
     private static final int    DOT_PORT     = 853;
     private static final int    MAX_PKT      = 32767;
@@ -139,7 +140,24 @@ public class SentinelaVpnService extends VpnService {
         return sUpstreamDns;
     }
 
+    public static synchronized void setNextDnsDotHost(String dotHost) {
+        if (dotHost == null) {
+            sNextDnsDotHost = "";
+            return;
+        }
+        sNextDnsDotHost = dotHost.trim().toLowerCase(Locale.ROOT);
+    }
+
+    public static synchronized String getNextDnsDotHost() {
+        return sNextDnsDotHost;
+    }
+
+    public static boolean isVpnActive() {
+        return sServiceActive.get();
+    }
+
     // ── Estado do serviço ────────────────────────────────────────────────────
+    private static final AtomicBoolean sServiceActive = new AtomicBoolean(false);
     private Thread               mThread;
     private ParcelFileDescriptor mInterface;
     private final AtomicBoolean  isRunning = new AtomicBoolean(false);
@@ -155,6 +173,7 @@ public class SentinelaVpnService extends VpnService {
             stopVpn();
             return START_NOT_STICKY;
         }
+        sServiceActive.set(true);
         startForeground();
         if (!isRunning.get()) {
             mThread = new Thread(this::runVpnLoop, "SentinelaVpnLoop");
@@ -480,6 +499,7 @@ public class SentinelaVpnService extends VpnService {
     // ── Limpeza ───────────────────────────────────────────────────────────────
     private void stopVpn() {
         isRunning.set(false);
+        sServiceActive.set(false);
         if (mDnsSocket != null) { mDnsSocket.close(); mDnsSocket = null; }
         try { stopForeground(true); } catch (Exception ignored) {}
         if (mTunOut != null) { try { mTunOut.close(); } catch (IOException ignored) {} mTunOut = null; }

@@ -57,7 +57,7 @@ export function useParentCreditsApps(): {
 
   useEffect(() => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) {return;}
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
 

@@ -22,7 +22,7 @@ export async function getTokens(): Promise<number> {
     const raw = await AsyncStorage.getItem(TOKENS_KEY);
     if (raw != null) {
       const n = parseInt(raw, 10);
-      if (!isNaN(n)) return Math.max(0, n);
+      if (!isNaN(n)) {return Math.max(0, n);}
     }
   } catch {
     // ignore
@@ -52,7 +52,7 @@ export async function unlockAppWithTokens(
   tokensToSpend: number,
 ): Promise<{ok: boolean; balance: number; minutesGranted: number; expiresAt?: number}> {
   const {ok, balance} = await spendTokens(tokensToSpend);
-  if (!ok) return {ok: false, balance, minutesGranted: 0};
+  if (!ok) {return {ok: false, balance, minutesGranted: 0};}
 
   const minutesGranted = Math.floor((tokensToSpend / 100) * MINUTES_PER_100_TOKENS);
   const expiresAt = Date.now() + minutesGranted * 60 * 1000;
@@ -68,7 +68,7 @@ export async function unlockAppWithTokens(
 export async function getAppUnlocks(): Promise<AppUnlock[]> {
   try {
     const raw = await AsyncStorage.getItem(UNLOCKS_KEY);
-    if (!raw) return [];
+    if (!raw) {return [];}
     const parsed = JSON.parse(raw) as AppUnlock[];
     const now = Date.now();
     return (Array.isArray(parsed) ? parsed : []).filter(u => u.expiresAt > now);
@@ -87,7 +87,7 @@ export function tokensForMinutes(minutes: number): number {
 
 export async function markTaskDone(taskId: string, reward: number): Promise<number> {
   const done = await getTasksDone();
-  if (done.has(taskId)) return await getTokens();
+  if (done.has(taskId)) {return await getTokens();}
   const next = new Set(done);
   next.add(taskId);
   await AsyncStorage.setItem(TASKS_DONE_KEY, JSON.stringify([...next]));
@@ -97,7 +97,7 @@ export async function markTaskDone(taskId: string, reward: number): Promise<numb
 export async function getTasksDone(): Promise<Set<string>> {
   try {
     const raw = await AsyncStorage.getItem(TASKS_DONE_KEY);
-    if (!raw) return new Set();
+    if (!raw) {return new Set();}
     const parsed = JSON.parse(raw) as string[];
     return new Set(Array.isArray(parsed) ? parsed : []);
   } catch {
