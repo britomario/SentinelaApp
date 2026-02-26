@@ -7,7 +7,9 @@ import React, {useEffect} from 'react';
 import {Linking} from 'react-native';
 
 import {useToast} from '../feedback/ToastProvider';
+import {setChildIdTag} from '../../services/notifications/oneSignalService';
 import {
+  deriveChildIdFromPairToken,
   parsePairingUrl,
   storeChildPairingConfig,
 } from '../../services/pairingService';
@@ -33,6 +35,8 @@ export default function PairingDeepLinkHandler({
         parentPublicKeyB64: payload.parentPublicKeyB64,
         expiresAt: payload.expiresAt,
       });
+      const childId = deriveChildIdFromPairToken(payload.pairToken);
+      await setChildIdTag(childId);
       showToast({
         kind: 'success',
         title: 'Pareamento concluído',

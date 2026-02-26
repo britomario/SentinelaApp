@@ -36,6 +36,20 @@ export async function getPushSubscriptionId(): Promise<string | null> {
   }
 }
 
+/** Set child_id tag so dispatch filters reach this device (alerts/dispatch). */
+export async function setChildIdTag(childId: string): Promise<boolean> {
+  try {
+    if (!initialized) {
+      await initializeOneSignal();
+    }
+    OneSignal.User.addTag('child_id', childId);
+    return true;
+  } catch (error) {
+    captureHandledError(error, 'onesignal_add_tag');
+    return false;
+  }
+}
+
 export async function sendGuardianAlert(payload: {
   childId: string;
   title: string;

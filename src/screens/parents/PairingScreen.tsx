@@ -9,13 +9,17 @@ import {ensureParentKeyPair} from '../../security/e2eeService';
 import {getPushSubscriptionId, initializeOneSignal} from '../../services/notifications/oneSignalService';
 import {
   createPairingPayload,
+  deriveChildIdFromPairToken,
   PairingPayload,
+  setSelectedChildId,
   storeParentPairingToken,
 } from '../../services/pairingService';
 import {
+  addChildProfileFromPairing,
   getChildrenProfiles,
   MAX_CHILDREN_PROFILES,
 } from '../../services/childrenProfilesService';
+import {registerPairingOnServer} from '../../services/pairingSyncService';
 
 export default function PairingScreen(): React.JSX.Element {
   const navigation = useNavigation<any>();
@@ -42,7 +46,12 @@ export default function PairingScreen(): React.JSX.Element {
       const keys = await ensureParentKeyPair();
       const nextPayload = createPairingPayload(keys.publicKeyB64);
       await storeParentPairingToken(nextPayload.pairToken);
+      const childId = deriveChildIdFromPairToken(nextPayload.pairToken);
+      await setSelectedChildId(childId);
+      const {profiles: nextProfiles} = await addChildProfileFromPairing(childId);
+      setChildrenCount(nextProfiles.length);
       setPayload(nextPayload);
+      await registerPairingOnServer(childId).catch(() => undefined);
       const pushId = await getPushSubscriptionId();
       showToast({
         kind: 'success',

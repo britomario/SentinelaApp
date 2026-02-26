@@ -23,6 +23,7 @@ import {
   removeChildProfile,
   updateChildAvatar,
 } from '../../services/childrenProfilesService';
+import {setSelectedChildId} from '../../services/pairingService';
 import {BorderRadius, Colors, Shadows, Spacing} from '../../theme/colors';
 
 function getInitials(name: string): string {
@@ -122,7 +123,20 @@ export default function ChildrenManagementScreen(): React.JSX.Element {
 
       <View style={styles.cardsList}>
         {profiles.map(profile => (
-          <View key={profile.id} style={styles.childCard}>
+          <TouchableOpacity
+            key={profile.id}
+            style={styles.childCard}
+            onPress={async () => {
+              if (profile.childId) {
+                await setSelectedChildId(profile.childId);
+                showToast({
+                  kind: 'success',
+                  title: 'Perfil selecionado',
+                  message: `Monitorando ${profile.name}.`,
+                });
+              }
+            }}
+            activeOpacity={profile.childId ? 0.7 : 1}>
             <View style={[styles.avatarCircle, {backgroundColor: profile.avatarColor}]}>
               {profile.avatarUri ? (
                 <Image source={{uri: profile.avatarUri}} style={styles.avatarImage} />
@@ -139,19 +153,23 @@ export default function ChildrenManagementScreen(): React.JSX.Element {
             <View style={styles.childActions}>
               <TouchableOpacity
                 style={styles.iconAction}
-                onPress={() => handleChangePhoto(profile)}>
+                onPress={e => {
+                  e.stopPropagation();
+                  handleChangePhoto(profile);
+                }}>
                 <Camera size={18} color={Colors.primary} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.iconAction}
-                onPress={async () => {
+                onPress={async e => {
+                  e.stopPropagation();
                   const next = await removeChildProfile(profile.id);
                   setProfiles(next);
                 }}>
                 <Trash2 size={18} color={Colors.alert} />
               </TouchableOpacity>
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
         {profiles.length === 0 && (
           <View style={styles.emptyState}>
