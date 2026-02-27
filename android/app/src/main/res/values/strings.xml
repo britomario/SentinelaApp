@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">Sentinela</string>
-    <string name="accessibility_service_description">O Sentinela usa este serviço para bloquear aplicativos na lista de restrição. Ao abrir um app bloqueado, você será redirecionado para a tela inicial.</string>
+    <string name="accessibility_service_description">O Sentinela usa este serviço para bloquear aplicativos e sites na lista de proteção. Ao abrir um app ou site bloqueado, você será redirecionado para a tela inicial.</string>
 </resources>

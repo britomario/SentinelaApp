@@ -81,6 +81,100 @@ export default function WelcomeScreen(): React.JSX.Element {
     navigation.replace('PinSetup');
   };
 
+  const getProviderLabel = (provider: LinkedProvider): string => {
+    if (provider === 'google') {return 'Google';}
+    if (provider === 'apple') {return 'Apple';}
+    if (provider === 'facebook') {return 'Facebook';}
+    return 'provedor';
+  };
+
+  const getStartErrorMessage = (
+    provider: LinkedProvider,
+    code?: string,
+  ): {title: string; message: string} => {
+    const providerLabel = getProviderLabel(provider);
+    if (code === 'oauth_provider_not_supported') {
+      return {
+        title: `${providerLabel} indisponível`,
+        message: 'Este provedor não é suportado nesta versão.',
+      };
+    }
+    if (code === 'oauth_url_missing' || code === 'oauth_start_failed') {
+      return {
+        title: `${providerLabel} indisponível`,
+        message: `Não foi possível iniciar o login com ${providerLabel}. Verifique a configuração OAuth no Supabase.`,
+      };
+    }
+    if (code === 'oauth_open_url_failed') {
+      return {
+        title: `${providerLabel} indisponível`,
+        message: 'Não foi possível abrir a tela de autenticação no navegador.',
+      };
+    }
+    if (code === 'supabase_client_unavailable' || code === 'supabase_env_invalid') {
+      return {
+        title: 'Configuração inválida',
+        message:
+          'Configuração Supabase inválida: revise SUPABASE_URL (deve ser a base URL do projeto) e SUPABASE_ANON_KEY.',
+      };
+    }
+    return {
+      title: `${providerLabel} indisponível`,
+      message: 'Não foi possível iniciar o provedor no momento. Use o PIN de contingência.',
+    };
+  };
+
+  const getCallbackErrorMessage = (
+    provider: LinkedProvider,
+    code?: string,
+    serverMessage?: string,
+  ): {kind: 'info' | 'error'; title: string; message: string} => {
+    const providerLabel = getProviderLabel(provider);
+    if (code === 'oauth_cancelled_by_user') {
+      return {
+        kind: 'info',
+        title: `${providerLabel} cancelado`,
+        message: `O login com ${providerLabel} foi cancelado. Você pode tentar novamente ou usar o PIN de contingência.`,
+      };
+    }
+    if (code === 'oauth_callback_tokens_missing' || code === 'oauth_callback_invalid') {
+      return {
+        kind: 'error',
+        title: 'Retorno de autenticação inválido',
+        message: 'O app não recebeu os dados esperados do provedor. Verifique o redirect URL no Supabase.',
+      };
+    }
+    if (code === 'supabase_client_unavailable' || code === 'supabase_env_invalid') {
+      return {
+        kind: 'error',
+        title: 'Configuração inválida',
+        message:
+          'Configuração Supabase inválida: revise SUPABASE_URL (base URL do projeto) e SUPABASE_ANON_KEY.',
+      };
+    }
+    if (code === 'oauth_code_exchange_failed' || code === 'oauth_set_session_failed') {
+      return {
+        kind: 'error',
+        title: `Falha no login com ${providerLabel}`,
+        message:
+          serverMessage ||
+          'Não foi possível concluir a autenticação. Verifique sua conexão e tente novamente.',
+      };
+    }
+    if (code === 'oauth_provider_error') {
+      return {
+        kind: 'error',
+        title: `Falha no login com ${providerLabel}`,
+        message: serverMessage || `O provedor ${providerLabel} retornou um erro. Tente novamente.`,
+      };
+    }
+    return {
+      kind: 'error',
+      title: `Falha no login com ${providerLabel}`,
+      message: serverMessage || 'Não foi possível validar sua sessão. Use o PIN de contingência.',
+    };
+  };
+
   const finalizeSocialAuth = async (provider: LinkedProvider) => {
     const userId = await getAuthenticatedUserId();
     if (!userId) {
@@ -109,7 +203,7 @@ export default function WelcomeScreen(): React.JSX.Element {
 
   useEffect(() => {
     const handleUrl = async (url: string | null) => {
-      if (!isAuthCallbackUrl(url)) {
+      if (!url || !isAuthCallbackUrl(url)) {
         return;
       }
       const provider = pendingProvider;
@@ -117,9 +211,23 @@ export default function WelcomeScreen(): React.JSX.Element {
         return;
       }
       try {
-        const completed = await completeAuthFromCallbackUrl(url);
-        if (!completed) {
-          throw new Error('oauth_callback_exchange_failed');
+        const completion = await completeAuthFromCallbackUrl(url);
+        if (!completion.ok) {
+          const callbackMsg = getCallbackErrorMessage(
+            provider,
+            completion.code,
+            completion.message,
+          );
+          clearOauthTimeout();
+          setBusy(null);
+          setPendingProvider(null);
+          setShowFallbackPin(true);
+          showToast({
+            kind: callbackMsg.kind,
+            title: callbackMsg.title,
+            message: callbackMsg.message,
+          });
+          return;
         }
         const hasSession = await waitForAuthenticatedSession(12000);
         if (!hasSession) {
@@ -127,11 +235,13 @@ export default function WelcomeScreen(): React.JSX.Element {
         }
         clearOauthTimeout();
         setBusy(null);
+        setPendingProvider(null);
         await finalizeSocialAuth(provider);
       } catch (error) {
         captureHandledError(error, 'welcome_oauth_callback');
         clearOauthTimeout();
         setBusy(null);
+        setPendingProvider(null);
         setShowFallbackPin(true);
         showToast({
           kind: 'error',
@@ -166,14 +276,29 @@ export default function WelcomeScreen(): React.JSX.Element {
       return;
     }
     try {
-      const started = await signInWithProvider(provider);
-      if (!started) {
-        throw new Error('oauth_url_not_generated');
+      const start = await signInWithProvider(provider);
+      if (!start.ok) {
+        const startMessage = getStartErrorMessage(provider, start.code);
+        showToast({
+          kind: 'error',
+          title: startMessage.title,
+          message: startMessage.message,
+        });
+        setBusy(null);
+        setPendingProvider(null);
+        if (
+          start.code !== 'oauth_open_url_failed' &&
+          start.code !== 'oauth_url_missing'
+        ) {
+          setShowFallbackPin(true);
+        }
+        return;
       }
       setPendingProvider(provider);
       clearOauthTimeout();
       oauthTimeoutRef.current = setTimeout(() => {
         setBusy(null);
+        setPendingProvider(null);
         setShowFallbackPin(true);
         showToast({
           kind: 'info',
@@ -185,6 +310,7 @@ export default function WelcomeScreen(): React.JSX.Element {
       captureHandledError(error, 'welcome_oauth_start');
       clearOauthTimeout();
       setBusy(null);
+      setPendingProvider(null);
       setShowFallbackPin(true);
       showToast({
         kind: 'error',

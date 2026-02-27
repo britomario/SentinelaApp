@@ -23,6 +23,7 @@ type AppListProps = Readonly<{
   blockingEnabled: boolean;
   onToggleBlocking: (enabled: boolean) => void;
   onToggleApp: (packageName: string) => void;
+  blockingSwitchDisabled?: boolean;
 }>;
 
 export default function AppList({
@@ -30,6 +31,7 @@ export default function AppList({
   blockingEnabled,
   onToggleBlocking,
   onToggleApp,
+  blockingSwitchDisabled = false,
 }: AppListProps): React.JSX.Element {
   const {apps, loading, error, refresh} = useNativeApps();
   const [search, setSearch] = useState('');
@@ -75,10 +77,13 @@ export default function AppList({
         onChangeText={setSearch}
       />
       <View style={styles.row}>
-        <Text style={styles.label}>Bloquear apps</Text>
+        <Text style={styles.label}>
+          {blockingSwitchDisabled ? 'Bloqueio (conforme Proteção acima)' : 'Bloquear apps'}
+        </Text>
         <Switch
           value={blockingEnabled}
           onValueChange={onToggleBlocking}
+          disabled={blockingSwitchDisabled}
           trackColor={{false: '#CBD5E1', true: Colors.mintLight}}
           thumbColor={blockingEnabled ? Colors.mint : '#64748B'}
         />
@@ -93,14 +98,13 @@ export default function AppList({
             <View key={app.packageName} style={styles.appRow}>
               <AppIcon name={app.label} size={40} iconUri={app.iconUri} style={styles.appIcon} />
               <View style={styles.appInfo}>
-                <Text style={[styles.appLabel, !blockingEnabled && styles.textMuted]}>
+                <Text style={styles.appLabel}>
                   {app.label}
                 </Text>
               </View>
               <Switch
                 value={isBlocked}
                 onValueChange={() => onToggleApp(app.packageName)}
-                disabled={!blockingEnabled}
                 trackColor={{false: '#CBD5E1', true: Colors.alert}}
                 thumbColor={isBlocked ? Colors.white : '#64748B'}
               />

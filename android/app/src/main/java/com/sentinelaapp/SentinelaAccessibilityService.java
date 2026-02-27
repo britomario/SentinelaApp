@@ -17,7 +17,10 @@ import org.json.JSONObject;
 
 import java.util.HashSet;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Bloqueia apps quando o usuário tenta abri-los.
@@ -34,6 +37,22 @@ public class SentinelaAccessibilityService extends AccessibilityService {
     private static final String KEY_REST_MODE_ACTIVE = "rest_mode_active";
     private static final String KEY_FORCE_BLOCK_NOW = "force_block_now";
     private static final String KEY_LAST_FOREGROUND_PACKAGE = "last_foreground_package";
+    private static final String KEY_URL_BLOCKING_ENABLED = "url_blocking_enabled";
+    private static final String KEY_BLOCKED_DOMAINS = "blocked_domains";
+    private static final String KEY_WHITELIST_DOMAINS = "whitelist_domains";
+    private static final String KEY_BLOCKED_KEYWORDS = "blocked_keywords";
+
+    /** Navegadores nos quais verificamos URL */
+    private static final Set<String> BROWSER_PACKAGES = new HashSet<>(Arrays.asList(
+            "com.android.chrome",
+            "org.mozilla.firefox",
+            "org.mozilla.fennec_fdroid",
+            "org.mozilla.fenix",
+            "com.sec.android.app.sbrowser",
+            "com.microsoft.emmx",
+            "com.opera.browser",
+            "com.opera.mini.native"
+    ));
 
     /** Package do Sentinela — permite desligar o Modo Descanso mesmo com bloqueio ativo. */
     private static final String SENTINELA_PACKAGE = "com.sentinelaapp";
@@ -119,13 +138,33 @@ public class SentinelaAccessibilityService extends AccessibilityService {
         return (System.currentTimeMillis() - lastBlockAndBringAt) < BLOCK_DEBOUNCE_MS;
     }
 
+    /** Debounce para evitar excesso de checagens em TYPE_WINDOW_CONTENT_CHANGED. */
+    private static final long URL_CHECK_DEBOUNCE_MS = 1500L;
+    private volatile long lastUrlCheckScheduledAt;
+    private volatile String lastUrlCheckPackage;
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
-
+        int eventType = event.getEventType();
         CharSequence pkg = event.getPackageName();
         if (pkg == null || pkg.length() == 0) return;
         String packageName = pkg.toString();
+
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            if (isUrlBlockingEnabled() && BROWSER_PACKAGES.contains(packageName)) {
+                long now = System.currentTimeMillis();
+                boolean samePkg = packageName.equals(lastUrlCheckPackage);
+                if (!samePkg || (now - lastUrlCheckScheduledAt) > URL_CHECK_DEBOUNCE_MS) {
+                    lastUrlCheckPackage = packageName;
+                    lastUrlCheckScheduledAt = now;
+                    prefs.edit().putString(KEY_LAST_FOREGROUND_PACKAGE, packageName).apply();
+                    scheduleUrlChecks(packageName);
+                }
+            }
+            return;
+        }
+
+        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
         prefs.edit().putString(KEY_LAST_FOREGROUND_PACKAGE, packageName).apply();
 
         // Sentinela ganhou foco: desliga kill switch e evita loop.
@@ -167,9 +206,22 @@ public class SentinelaAccessibilityService extends AccessibilityService {
             return;
         }
 
+        // Bloqueio de URL em navegadores (proteção local)
+        if (isUrlBlockingEnabled() && BROWSER_PACKAGES.contains(packageName)) {
+            scheduleUrlChecks(packageName);
+        }
+
         // ANTI-TAMPERING: monitora configurações quando usuário tenta desativar proteção ou desinstalar
         if (isAntiTamperingEnabled() && "com.android.settings".equals(packageName)) {
             handler.postDelayed(this::checkAndBlockDangerousSettings, 150);
+        }
+    }
+
+    /** Agenda 5 checagens de URL (100ms, 500ms, 1s, 2s, 3s) para cobrir abertura e navegação. */
+    private void scheduleUrlChecks(String packageName) {
+        final long[] delays = {100, 500, 1000, 2000, 3000};
+        for (long d : delays) {
+            handler.postDelayed(() -> checkAndBlockUrlInBrowser(packageName), d);
         }
     }
 
@@ -193,6 +245,200 @@ public class SentinelaAccessibilityService extends AccessibilityService {
         } catch (Exception e) {
             Log.w(TAG, "checkAndBlockDangerousSettings: " + e.getMessage());
         }
+    }
+
+    private boolean isUrlBlockingEnabled() {
+        return prefs.getBoolean(KEY_URL_BLOCKING_ENABLED, false);
+    }
+
+    private Set<String> getBlockedDomains() {
+        return loadStringSet(KEY_BLOCKED_DOMAINS);
+    }
+
+    private Set<String> getWhitelistDomains() {
+        return loadStringSet(KEY_WHITELIST_DOMAINS);
+    }
+
+    private Set<String> getBlockedKeywords() {
+        return loadStringSet(KEY_BLOCKED_KEYWORDS);
+    }
+
+    private Set<String> loadStringSet(String key) {
+        Set<String> set = new HashSet<>();
+        try {
+            String raw = prefs.getString(key, "[]");
+            JSONArray arr = new JSONArray(raw);
+            boolean isKeywords = KEY_BLOCKED_KEYWORDS.equals(key);
+            for (int i = 0; i < arr.length(); i++) {
+                String s = arr.optString(i, "");
+                if (s != null && !s.trim().isEmpty()) {
+                    s = s.trim().toLowerCase(Locale.ROOT);
+                    if (isKeywords) s = s.replaceAll("\\s+", "");
+                    if (!s.isEmpty()) set.add(s);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "loadStringSet " + key + ": " + e.getMessage());
+        }
+        return set;
+    }
+
+    private static final Pattern DOMAIN_EXTRACT = Pattern.compile(
+            "https?://([^/\\\\?#]+)", Pattern.CASE_INSENSITIVE);
+
+    private void checkAndBlockUrlInBrowser(String packageName) {
+        try {
+            String foreground = prefs.getString(KEY_LAST_FOREGROUND_PACKAGE, "");
+            if (!packageName.equals(foreground)) return;
+
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return;
+
+            String url = extractUrlFromRoot(root);
+            root.recycle();
+
+            if (url == null || url.isEmpty()) return;
+
+            String domain = extractDomain(url);
+            if (domain == null || domain.isEmpty()) return;
+
+            if (shouldBlockUrl(url, domain)) {
+                Log.i(TAG, "URL bloqueada: " + url);
+                lastBlockAndBringAt = System.currentTimeMillis();
+                performGlobalAction(GLOBAL_ACTION_HOME);
+                bringSentinelaToFront();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "checkAndBlockUrlInBrowser: " + e.getMessage());
+        }
+    }
+
+    private String extractUrlFromRoot(AccessibilityNodeInfo root) {
+        try {
+            if (root == null) return null;
+            String url = findUrlByViewId(root, "com.android.chrome:id/url_bar");
+            if (url != null) return url;
+            url = findUrlByViewId(root, "org.mozilla.firefox:id/mozac_browser_toolbar_url_view");
+            if (url != null) return url;
+            url = findUrlByViewId(root, "org.mozilla.fenix:id/mozac_browser_toolbar_url_view");
+            if (url != null) return url;
+            url = findUrlByViewId(root, "com.sec.android.app.sbrowser:id/location_bar_edit_text");
+            if (url != null) return url;
+            url = findUrlByViewId(root, "com.microsoft.emmx:id/url_bar");
+            if (url != null) return url;
+            url = findUrlByViewId(root, "com.opera.browser:id/url_field");
+            if (url != null) return url;
+            url = findUrlByViewId(root, "com.opera.mini.native:id/url_view");
+            if (url != null) return url;
+            url = findUrlFromText(root);
+            if (url != null) return url;
+            return extractUrlFromGatheredText(gatherAllText(root));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String findUrlByViewId(AccessibilityNodeInfo root, String viewId) {
+        try {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(viewId);
+            if (nodes != null && !nodes.isEmpty()) {
+                for (AccessibilityNodeInfo node : nodes) {
+                    if (node != null && node.getText() != null) {
+                        String text = node.getText().toString().trim();
+                        if (text.startsWith("http://") || text.startsWith("https://")) {
+                            node.recycle();
+                            return text;
+                        }
+                    }
+                }
+                for (AccessibilityNodeInfo node : nodes) {
+                    if (node != null) node.recycle();
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private String findUrlFromText(AccessibilityNodeInfo root) {
+        try {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText("http");
+            if (nodes != null && !nodes.isEmpty()) {
+                for (AccessibilityNodeInfo node : nodes) {
+                    if (node == null) continue;
+                    CharSequence text = node.getText();
+                    if (text != null) {
+                        String s = text.toString().trim();
+                        if (s.startsWith("http://") || s.startsWith("https://")) {
+                            node.recycle();
+                            return s;
+                        }
+                    }
+                    node.recycle();
+                }
+            }
+            return extractUrlFromGatheredText(gatherAllText(root));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractUrlFromGatheredText(String text) {
+        if (text == null || text.isEmpty()) return null;
+        int idx = text.indexOf("https://");
+        if (idx < 0) idx = text.indexOf("http://");
+        if (idx < 0) return null;
+        int schemeLen = (idx + 8 <= text.length() && text.startsWith("https://", idx)) ? 8 : 7;
+        int end = idx + schemeLen;
+        while (end < text.length()) {
+            char c = text.charAt(end);
+            if (c == ' ' || c == '\n' || c == '\r' || c == '"' || c == '\'' || c == ')' || c == '>') break;
+            end++;
+        }
+        return text.substring(idx, end);
+    }
+
+    private String extractDomain(String url) {
+        if (url == null) return null;
+        try {
+            java.util.regex.Matcher m = DOMAIN_EXTRACT.matcher(url);
+            if (m.find()) {
+                String host = m.group(1);
+                if (host != null) {
+                    int portIdx = host.indexOf(':');
+                    if (portIdx >= 0) host = host.substring(0, portIdx);
+                    return host.toLowerCase(Locale.ROOT);
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static final Set<String> DEFAULT_KEYWORDS = new HashSet<>(Arrays.asList(
+            "bet", "porn", "xxx", "casino", "apostas", "onlyfans", "pornhub", "xvideos", "xnxx", "bet365", "betano"
+    ));
+
+    private boolean shouldBlockUrl(String url, String domain) {
+        Set<String> whitelist = getWhitelistDomains();
+        for (String wl : whitelist) {
+            if (wl == null || wl.isEmpty()) continue;
+            if (domain.equals(wl) || domain.endsWith("." + wl)) return false;
+        }
+
+        Set<String> blacklist = getBlockedDomains();
+        for (String bl : blacklist) {
+            if (bl == null || bl.isEmpty()) continue;
+            if (domain.equals(bl) || domain.endsWith("." + bl) || bl.endsWith("." + domain)) return true;
+        }
+
+        String urlLower = url.toLowerCase(Locale.ROOT);
+        Set<String> keywords = getBlockedKeywords();
+        for (String kw : keywords) {
+            if (kw != null && !kw.isEmpty() && urlLower.contains(kw)) return true;
+        }
+        for (String kw : DEFAULT_KEYWORDS) {
+            if (urlLower.contains(kw)) return true;
+        }
+        return false;
     }
 
     private String gatherAllText(AccessibilityNodeInfo node) {
@@ -289,4 +535,8 @@ public class SentinelaAccessibilityService extends AccessibilityService {
     static String getKeyRestModeActive() { return KEY_REST_MODE_ACTIVE; }
     static String getKeyForceBlockNow() { return KEY_FORCE_BLOCK_NOW; }
     static String getKeyLastForegroundPackage() { return KEY_LAST_FOREGROUND_PACKAGE; }
+    static String getKeyUrlBlockingEnabled() { return KEY_URL_BLOCKING_ENABLED; }
+    static String getKeyBlockedDomains() { return KEY_BLOCKED_DOMAINS; }
+    static String getKeyWhitelistDomains() { return KEY_WHITELIST_DOMAINS; }
+    static String getKeyBlockedKeywords() { return KEY_BLOCKED_KEYWORDS; }
 }

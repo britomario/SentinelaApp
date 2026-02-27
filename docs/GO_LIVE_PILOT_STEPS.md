@@ -19,12 +19,13 @@ Corrija qualquer variável faltando antes de continuar.
 ## Passo 1 — Supabase
 
 1. Crie um projeto no [Supabase](https://supabase.com) (ex.: `sentinela-pilot`).
-2. Ative **Auth** (Google + Apple) e **Realtime**.
-3. Rode as migrations no projeto:
+2. Ative **Auth** (Google + Apple + Facebook) e **Realtime**.
+3. Configure OAuth: adicione `sentinela://auth/callback` em Auth > URL Configuration > Redirect URLs. Veja [AUTH_OAUTH_CHECKLIST.md](AUTH_OAUTH_CHECKLIST.md) para o checklist completo.
+4. Rode as migrations no projeto:
    - No terminal: `supabase link` (se usar CLI) e depois `supabase db push`, **ou**
    - No dashboard: SQL Editor -> execute o conteúdo de `supabase/migrations/007_go_live_tables.sql`.
-4. Confirme que o projeto aplicou as policies da migration 007 (RLS básico para tabelas de location, DNS e family state).
-5. Anote e guarde:
+5. Confirme que o projeto aplicou as policies da migration 007 (RLS básico para tabelas de location, DNS e family state).
+6. Anote e guarde:
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` (somente backend/API)

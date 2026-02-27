@@ -2,7 +2,8 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   Image,
   Modal,
-  NativeModules,
+  PermissionsAndroid,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {launchImageLibrary} from 'react-native-image-picker';
 import {useNavigation} from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
 import {Camera, Trash2, UserRound} from 'lucide-react-native';
@@ -22,6 +24,7 @@ import {
   MAX_CHILDREN_PROFILES,
   removeChildProfile,
   updateChildAvatar,
+  updateChildName,
 } from '../../services/childrenProfilesService';
 import {setSelectedChildId} from '../../services/pairingService';
 import {BorderRadius, Colors, Shadows, Spacing} from '../../theme/colors';
@@ -37,6 +40,9 @@ export default function ChildrenManagementScreen(): React.JSX.Element {
   const [profiles, setProfiles] = useState<ChildProfile[]>([]);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [childName, setChildName] = useState('');
+  const [editNameModalVisible, setEditNameModalVisible] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<ChildProfile | null>(null);
+  const [editNameValue, setEditNameValue] = useState('');
 
   const loadProfiles = useCallback(() => {
     getChildrenProfiles()
@@ -63,24 +69,83 @@ export default function ChildrenManagementScreen(): React.JSX.Element {
     setAddModalVisible(false);
   };
 
+  const requestPhotoPermission = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') {return true;}
+    try {
+      const apiLevel = Platform.Version as number;
+      const perm =
+        apiLevel >= 33
+          ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+          : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+      const result = await PermissionsAndroid.request(perm, {
+        title: 'Acesso às fotos',
+        message: 'Permita o acesso à galeria para escolher a foto do perfil.',
+        buttonPositive: 'Permitir tudo',
+      });
+      return result === PermissionsAndroid.RESULTS.GRANTED;
+    } catch {
+      return false;
+    }
+  };
+
   const handleChangePhoto = async (profile: ChildProfile) => {
-    const picker = (NativeModules as any)?.ImagePickerManager;
-    if (!picker?.launchImageLibrary) {
+    const granted = await requestPhotoPermission();
+    if (!granted) {
       showToast({
-        kind: 'info',
-        title: 'Galeria indisponível',
-        message: 'Módulo de galeria não encontrado neste build.',
+        kind: 'error',
+        title: 'Permissão negada',
+        message: 'É necessário permitir acesso às fotos para adicionar imagem ao perfil.',
       });
       return;
     }
-    picker.launchImageLibrary({}, async (response: any) => {
-      const uri = response?.uri || response?.assets?.[0]?.uri;
-      if (!uri) {
+    try {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.8,
+        selectionLimit: 1,
+      });
+      if (result.didCancel) {return;}
+      if (result.errorCode) {
+        showToast({
+          kind: 'error',
+          title: 'Erro na galeria',
+          message: result.errorMessage ?? 'Não foi possível abrir a galeria.',
+        });
         return;
       }
-      const next = await updateChildAvatar(profile.id, uri);
-      setProfiles(next);
-    });
+      const uri = result.assets?.[0]?.uri;
+      if (uri) {
+        const next = await updateChildAvatar(profile.id, uri);
+        setProfiles(next);
+        showToast({kind: 'success', title: 'Foto atualizada'});
+      }
+    } catch (err) {
+      showToast({
+        kind: 'error',
+        title: 'Galeria indisponível',
+        message: 'Não foi possível abrir a galeria. Tente novamente.',
+      });
+    }
+  };
+
+  const openEditName = (profile: ChildProfile) => {
+    setEditingProfile(profile);
+    setEditNameValue(profile.name);
+    setEditNameModalVisible(true);
+  };
+
+  const handleSaveName = async () => {
+    const name = editNameValue.trim();
+    if (!name || !editingProfile) {
+      showToast({kind: 'error', title: 'Nome inválido', message: 'Digite um nome ou apelido.'});
+      return;
+    }
+    const next = await updateChildName(editingProfile.id, name);
+    setProfiles(next);
+    setEditNameModalVisible(false);
+    setEditingProfile(null);
+    setEditNameValue('');
+    showToast({kind: 'success', title: 'Nome atualizado'});
   };
 
   return (
@@ -145,7 +210,15 @@ export default function ChildrenManagementScreen(): React.JSX.Element {
               )}
             </View>
             <View style={styles.childInfo}>
-              <Text style={styles.childName}>{profile.name}</Text>
+              <TouchableOpacity
+                onPress={e => {
+                  e.stopPropagation();
+                  openEditName(profile);
+                }}
+                activeOpacity={0.7}
+                hitSlop={{top: 8, bottom: 8, left: 0, right: 0}}>
+                <Text style={styles.childName}>{profile.name}</Text>
+              </TouchableOpacity>
               <Text style={styles.childStatus}>
                 {profile.status === 'active' ? 'Proteção ativa' : 'Proteção pausada'}
               </Text>
@@ -200,6 +273,38 @@ export default function ChildrenManagementScreen(): React.JSX.Element {
                 style={[styles.modalBtn, styles.modalConfirm]}
                 onPress={() => handleAddProfile()}>
                 <Text style={styles.modalConfirmText}>Adicionar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={editNameModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Editar nome</Text>
+            <TextInput
+              value={editNameValue}
+              onChangeText={setEditNameValue}
+              placeholder="Nome ou apelido do filho"
+              placeholderTextColor={Colors.textMuted}
+              style={styles.modalInput}
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalCancel]}
+                onPress={() => {
+                  setEditNameModalVisible(false);
+                  setEditingProfile(null);
+                  setEditNameValue('');
+                }}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalConfirm]}
+                onPress={handleSaveName}>
+                <Text style={styles.modalConfirmText}>Salvar</Text>
               </TouchableOpacity>
             </View>
           </View>

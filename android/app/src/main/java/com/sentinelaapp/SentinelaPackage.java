@@ -18,7 +18,7 @@ public class SentinelaPackage implements ReactPackage {
     public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
         List<NativeModule> modules = new ArrayList<>();
         // Registra o nosso módulo aqui
-        modules.add(new VpnModule(reactContext));
+        modules.add(new BlockingModule(reactContext));
         modules.add(new AppBlockModule(reactContext));
         modules.add(new SecurityModule(reactContext));
         modules.add(new DisplayWellnessModule(reactContext));

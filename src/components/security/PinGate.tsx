@@ -23,6 +23,8 @@ type PinGateProps = {
   visible: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /** Chamado com o PIN validado antes de onSuccess; use quando a ação precisar do PIN (ex.: Escudo). */
+  onSuccessWithPin?: (pin: string) => void;
   title?: string;
 };
 
@@ -30,6 +32,7 @@ export default function PinGate({
   visible,
   onClose,
   onSuccess,
+  onSuccessWithPin,
   title = 'Digite o PIN',
 }: PinGateProps): React.JSX.Element {
   const {showToast} = useToast();
@@ -43,7 +46,9 @@ export default function PinGate({
     try {
       const ok = await SecurityModule?.validateSecurityPin?.(pin);
       if (ok) {
+        const validatedPin = pin;
         setPin('');
+        onSuccessWithPin?.(validatedPin);
         onSuccess();
         onClose();
       } else {

@@ -1,4 +1,4 @@
-import OneSignal from 'react-native-onesignal';
+import {OneSignal} from 'react-native-onesignal';
 import {getEnv} from '../config/env';
 import {captureHandledError} from '../observability/sentry';
 

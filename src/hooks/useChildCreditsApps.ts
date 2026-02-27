@@ -19,12 +19,29 @@ export type CreditsAppEntry = AppIconEntry & { packageName: string; dailyLimitMi
 
 export type InstalledAppEntry = { packageName: string; label: string; iconUri?: string };
 
+async function fetchInstalledApps(): Promise<InstalledAppEntry[]> {
+  if (Platform.OS !== 'android' || !AppBlockModule?.getInstalledApps) {
+    return [];
+  }
+  const installed = await AppBlockModule.getInstalledApps();
+  const list = Array.isArray(installed)
+    ? installed.map((r: { packageName?: string; label?: string; iconUri?: string }) => ({
+        packageName: r.packageName ?? '',
+        label: r.label ?? r.packageName ?? '',
+        iconUri: r.iconUri ?? undefined,
+      }))
+    : [];
+  list.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+  return list;
+}
+
 export function useChildCreditsApps(): {
   creditsApps: CreditsAppEntry[];
   installedApps: InstalledAppEntry[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  loadInstalledApps: () => Promise<void>;
   addApp: (pkg: string, label: string, iconUri?: string) => Promise<void>;
   removeApp: (packageName: string) => Promise<void>;
 } {
@@ -33,26 +50,47 @@ export function useChildCreditsApps(): {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const loadInstalledApps = useCallback(async () => {
+    try {
+      const list = await fetchInstalledApps();
+      setInstalledApps(list);
+    } catch {
+      setInstalledApps([]);
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const credits = await getChildCreditsApps();
+      const entries: CreditsAppEntry[] = credits.map(c => {
+        const entry = toAppIconEntry(c.packageName, c.displayName, c.iconUri);
+        return {
+          ...entry,
+          id: c.packageName,
+          packageName: c.packageName,
+          dailyLimitMinutes: c.dailyLimitMinutes ?? 0,
+        };
+      });
+      setCreditsApps(entries);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Falha ao carregar apps');
+      setCreditsApps([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refreshFull = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [credits, installed] = await Promise.all([
         getChildCreditsApps(),
-        Platform.OS === 'android' && AppBlockModule?.getInstalledApps
-          ? AppBlockModule.getInstalledApps()
-          : Promise.resolve([]),
+        fetchInstalledApps(),
       ]);
-
-      const installedList = Array.isArray(installed)
-        ? installed.map((r: { packageName?: string; label?: string; iconUri?: string }) => ({
-            packageName: r.packageName ?? '',
-            label: r.label ?? r.packageName ?? '',
-            iconUri: r.iconUri ?? undefined,
-          }))
-        : [];
-      installedList.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-      setInstalledApps(installedList);
+      setInstalledApps(installed);
 
       const entries: CreditsAppEntry[] = credits.map(c => {
         const entry = toAppIconEntry(c.packageName, c.displayName, c.iconUri);
@@ -80,13 +118,13 @@ export function useChildCreditsApps(): {
       iconUri,
       dailyLimitMinutes: 0,
     });
-    await refresh();
-  }, [refresh]);
+    await refreshFull();
+  }, [refreshFull]);
 
   const removeApp = useCallback(async (packageName: string) => {
     await removeChildCreditsApp(packageName);
-    await refresh();
-  }, [refresh]);
+    await refreshFull();
+  }, [refreshFull]);
 
   useEffect(() => {
     refresh();
@@ -105,6 +143,7 @@ export function useChildCreditsApps(): {
     loading,
     error,
     refresh,
+    loadInstalledApps,
     addApp,
     removeApp,
   };

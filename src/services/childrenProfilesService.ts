@@ -98,6 +98,16 @@ export async function updateChildAvatar(profileId: string, avatarUri?: string): 
   return saveProfiles(next);
 }
 
+export async function updateChildName(profileId: string, name: string): Promise<ChildProfile[]> {
+  const normalized = name.trim();
+  const current = await getChildrenProfiles();
+  if (!normalized) {return current;}
+  const next = current.map(profile =>
+    profile.id === profileId ? {...profile, name: normalized} : profile,
+  );
+  return saveProfiles(next);
+}
+
 export async function updateChildProfileChildId(
   profileId: string,
   childId: string,

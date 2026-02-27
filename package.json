@@ -31,6 +31,7 @@
     "react-native": "0.76.6",
     "react-native-config": "^1.6.1",
     "react-native-get-random-values": "^1.11.0",
+    "react-native-image-picker": "^7.2.3",
     "react-native-in-app-review": "^4.4.2",
     "react-native-linear-gradient": "^2.8.3",
     "react-native-maps": "^1.26.0",

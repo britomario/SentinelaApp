@@ -17,6 +17,7 @@ import {
   TextInput,
   FlatList,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import {
@@ -37,6 +38,7 @@ import {
 } from '../../services/childTokenService';
 import {useChildCreditsApps} from '../../hooks/useChildCreditsApps';
 import {useChildTasks} from '../../hooks/useChildTasks';
+import {useShieldStatus} from '../../hooks/useShieldStatus';
 import {
   isRestModeActive,
   setRestModeActive,
@@ -71,8 +73,10 @@ export default function ChildModeScreen(): React.JSX.Element {
     loading: creditsLoading,
     addApp,
     refresh: refreshCredits,
+    loadInstalledApps,
   } = useChildCreditsApps();
   const { tasks, loading: tasksLoading, refresh: refreshTasks } = useChildTasks();
+  const { shieldStatus, refreshShieldStatus } = useShieldStatus();
   const [sosHold, setSosHold] = useState(false);
   const [sosCountdown, setSosCountdown] = useState(3);
   const [showDistanceWarning, setShowDistanceWarning] = useState(false);
@@ -120,7 +124,8 @@ export default function ChildModeScreen(): React.JSX.Element {
     setBlockedApps(blocked);
     refreshCredits();
     refreshTasks();
-  }, [refreshCredits, refreshTasks]);
+    refreshShieldStatus();
+  }, [refreshCredits, refreshTasks, refreshShieldStatus]);
 
   useEffect(() => {
     refreshData();
@@ -128,18 +133,22 @@ export default function ChildModeScreen(): React.JSX.Element {
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      if (Platform.OS === 'android' && NativeModules.DisplayWellnessModule) {
-        const hasPermission = await requestDisplayPermission();
-        if (mounted) {
-          setDisplayPermissionReady(hasPermission);
-        }
-        const active = await isRestModeActive();
-        await applyRestModeDisplay(active);
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!mounted) {
+        return;
       }
-    })();
+      if (Platform.OS === 'android' && NativeModules.DisplayWellnessModule) {
+        requestDisplayPermission()
+          .then(hasPermission => mounted && setDisplayPermissionReady(hasPermission))
+          .catch(() => undefined);
+        isRestModeActive()
+          .then(active => applyRestModeDisplay(active))
+          .catch(() => undefined);
+      }
+    });
     return () => {
       mounted = false;
+      task.cancel();
     };
   }, []);
 
@@ -161,28 +170,34 @@ export default function ChildModeScreen(): React.JSX.Element {
    *
    * Background: em RN o watchPosition pode ter precisão/intervalo limitado em segundo plano.
    *
-   * Estados: Inicializando... | Conectado e protegido | Sem atualização recente |
-   *         Permissão negada | Falha ao iniciar
+   * Estados: Inicializando... | Aguardando localização... | Conectado e protegido |
+   *         Sem atualização recente | Permissão negada | Falha ao iniciar
    */
   const STALE_MINUTES = 10;
   const POLL_INTERVAL_MS = 15000;
+  const LOCATION_INIT_TIMEOUT_MS = 35000;
 
   useEffect(() => {
-    startBackgroundLocationTracking(childId)
-      .then(ok => {
-        if (!ok) {
-          setLocationStatus('Permissão negada');
-          return;
-        }
-        /* Mantém "Inicializando..." até o primeiro timestamp no poll */
-      })
-      .catch(() => setLocationStatus('Falha ao iniciar'));
+    const mountedAt = Date.now();
+    const task = InteractionManager.runAfterInteractions(() => {
+      startBackgroundLocationTracking(childId)
+        .then(ok => {
+          if (!ok) {
+            setLocationStatus('Permissão negada');
+            return;
+          }
+          /* Mantém "Inicializando..." até o primeiro timestamp ou timeout */
+        })
+        .catch(() => setLocationStatus('Falha ao iniciar'));
+    });
 
     const id = setInterval(() => {
       getLastLocationTimestamp()
         .then(ts => {
           if (!ts) {
-            /* Nunca conectou: não mostrar "Sem atualização" antes do primeiro timestamp */
+            if (Date.now() - mountedAt >= LOCATION_INIT_TIMEOUT_MS) {
+              setLocationStatus('Aguardando localização...');
+            }
             return;
           }
           const deltaMinutes = Math.floor((Date.now() - ts) / 60000);
@@ -198,6 +213,7 @@ export default function ChildModeScreen(): React.JSX.Element {
     return () => {
       clearInterval(id);
       stopBackgroundLocationTracking();
+      task.cancel();
     };
   }, [childId]);
 
@@ -268,7 +284,7 @@ export default function ChildModeScreen(): React.JSX.Element {
     });
   };
 
-  const protectionActive = locationStatus.includes('Conectado');
+  const protectionActive = shieldStatus.enabled;
   const levelProgress = computeLevelProgress(tokens);
 
   const exitRestMode = async () => {
@@ -401,7 +417,7 @@ export default function ChildModeScreen(): React.JSX.Element {
                 styles.statusText,
                 protectionActive ? styles.statusTextActive : styles.statusTextPaused,
               ]}>
-              {protectionActive ? 'Conectado e Seguro' : 'Proteção Pausada'}
+              {protectionActive ? 'Proteção ativa' : 'Proteção pausada'}
             </Text>
           </View>
 
@@ -457,7 +473,10 @@ export default function ChildModeScreen(): React.JSX.Element {
             <Text style={styles.sectionTitle}>Apps</Text>
             <TouchableOpacity
               style={styles.addAppBtn}
-              onPress={() => setAddAppModalVisible(true)}>
+              onPress={() => {
+                setAddAppModalVisible(true);
+                loadInstalledApps();
+              }}>
               <Text style={styles.addAppBtnText}>+ Adicionar</Text>
             </TouchableOpacity>
           </View>
@@ -469,7 +488,10 @@ export default function ChildModeScreen(): React.JSX.Element {
               </Text>
               <TouchableOpacity
                 style={styles.emptyAppsBtn}
-                onPress={() => setAddAppModalVisible(true)}>
+                onPress={() => {
+                  setAddAppModalVisible(true);
+                  loadInstalledApps();
+                }}>
                 <Text style={styles.emptyAppsBtnText}>Adicionar app</Text>
               </TouchableOpacity>
             </View>

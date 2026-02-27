@@ -4,12 +4,12 @@
  */
 
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   AppState,
   DeviceEventEmitter,
   NativeModules,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -22,43 +22,45 @@ import {
 import {useRoute} from '@react-navigation/native';
 
 import AppList from '../../components/settings/AppList';
-import DnsToggle from '../../components/settings/DnsToggle';
 import PinGate from '../../components/security/PinGate';
 import {useToast} from '../../components/feedback/ToastProvider';
-import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
 import {useChildTasks} from '../../hooks/useChildTasks';
 import {syncAppPolicyToSupabase} from '../../services/appPolicySyncService';
-import {getEnv} from '../../services/config/env';
 import {getCurrentChildId} from '../../services/currentChildService';
 import {encryptAndStoreMonitoringEvent} from '../../security/monitoringVault';
-import {DNS_PROFILES, type DnsMode, getDnsProfile} from '../../services/dnsProfiles';
-import {syncDnsPolicyForChild} from '../../services/dnsPolicyService';
-import {resolveDomainWithDoh} from '../../services/dohEngineService';
+import {
+  getSyncStatus,
+  syncBlacklist,
+} from '../../services/blacklistSyncService';
 import {
   addDomainToList,
+  addKeyword,
   getManualDomainLists,
   removeDomainFromList,
+  removeKeyword,
 } from '../../services/manualDomainListService';
 import {
   activateShield,
   deactivateShield,
   getShieldErrorMessage,
-  setShieldProfile,
   syncBlacklistToShield,
 } from '../../services/shieldService';
 import {Colors, Spacing, BorderRadius} from '../../theme/colors';
 import {useShieldStatus} from '../../hooks/useShieldStatus';
 
-const {AppBlockModule, VpnModule} = NativeModules as any;
-const DNS_APPLIED_KEY = '@sentinela/dns_protection_applied';
-type DnsValidationState = 'idle' | 'checking' | 'verified' | 'failed';
+const {AppBlockModule} = NativeModules as any;
 
-type ConfigTab = 'dns' | 'apps' | 'tasks' | 'manual';
+function formatHoursAgo(ms: number): string {
+  const h = Math.floor((Date.now() - ms) / 3600000);
+  if (h < 1) {return 'menos de 1 hora';}
+  if (h === 1) {return '1 hora';}
+  return `${h} horas`;
+}
+type ConfigTab = 'apps' | 'tasks' | 'manual';
 
 export default function ConfigScreen(): React.JSX.Element {
   const route = useRoute<any>();
   const {showToast} = useToast();
-  const {recordReviewSignal} = useReviewPrompt();
   const {
     tasks,
     loading: tasksLoading,
@@ -66,29 +68,29 @@ export default function ConfigScreen(): React.JSX.Element {
     updateTask,
     removeTask,
   } = useChildTasks();
-  const [tab, setTab] = useState<ConfigTab>('dns');
+  const [tab, setTab] = useState<ConfigTab>('apps');
   const [taskModal, setTaskModal] = useState<'new' | { id: string; title: string; reward: number } | null>(null);
   const [taskTitle, setTaskTitle] = useState('');
   const [taskReward, setTaskReward] = useState('50');
   const [pinGateVisible, setPinGateVisible] = useState(false);
   const pendingPinActionRef = useRef<() => void | Promise<void>>(() => {});
+  const pendingShieldPinActionRef = useRef<((pin: string) => Promise<void>) | null>(null);
   const [accessibilityEnabled, setAccessibilityEnabled] = useState(false);
   const [blockingEnabled, setBlockingEnabled] = useState(false);
   const [blockedApps, setBlockedApps] = useState<Set<string>>(new Set());
   const [antiTampering, setAntiTampering] = useState(true);
 
-  const [dnsMode, setDnsMode] = useState<DnsMode>('light');
-  const [selectedProfileId, setSelectedProfileId] = useState(DNS_PROFILES[0].id);
-  const [useCustom, setUseCustom] = useState(false);
-  const [dnsProtectionApplied, setDnsProtectionApplied] = useState(false);
-  const [customDotHost, setCustomDotHost] = useState('');
-  const [customDohUrl, setCustomDohUrl] = useState('');
-  const [dnsValidationState, setDnsValidationState] = useState<DnsValidationState>('idle');
-  const [dnsValidationMessage, setDnsValidationMessage] = useState('');
-  const [childId, setChildId] = useState<string>('local-child');
+  const [_childId, setChildId] = useState<string>('local-child');
   const [manualDomainInput, setManualDomainInput] = useState('');
+  const [keywordInput, setKeywordInput] = useState('');
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [whitelist, setWhitelist] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [syncStatus, setSyncStatus] = useState<{lastSyncAt: number | null; totalBlocked: number}>({
+    lastSyncAt: null,
+    totalBlocked: 0,
+  });
+  const [syncing, setSyncing] = useState(false);
   const [isShieldLoading, setIsShieldLoading] = useState(false);
   const justOpenedAccessibilityRef = useRef<number>(0);
   const {shieldStatus, refreshShieldStatus} = useShieldStatus();
@@ -109,8 +111,8 @@ export default function ConfigScreen(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    AsyncStorage.getItem(DNS_APPLIED_KEY).then(v => setDnsProtectionApplied(v === '1')).catch(() => {});
-  }, []);
+    setBlockingEnabled(shieldStatus.enabled);
+  }, [shieldStatus.enabled]);
 
   useEffect(() => {
     getCurrentChildId()
@@ -123,8 +125,13 @@ export default function ConfigScreen(): React.JSX.Element {
       .then(lists => {
         setBlacklist(lists.blacklist);
         setWhitelist(lists.whitelist);
+        setKeywords(lists.keywords);
       })
       .catch(() => undefined);
+    getSyncStatus().then(s => setSyncStatus({
+      lastSyncAt: s.lastSyncAt,
+      totalBlocked: s.totalBlocked,
+    })).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -132,7 +139,7 @@ export default function ConfigScreen(): React.JSX.Element {
     if (!incomingTab) {
       return;
     }
-    if (incomingTab === 'dns' || incomingTab === 'apps' || incomingTab === 'tasks' || incomingTab === 'manual') {
+    if (incomingTab === 'apps' || incomingTab === 'tasks' || incomingTab === 'manual') {
       setTab(incomingTab);
     }
   }, [route.params?.initialTab]);
@@ -190,17 +197,87 @@ export default function ConfigScreen(): React.JSX.Element {
     }
   };
 
-  const toggleBlocking = (v: boolean) => {
-    executeWithPin(() => {
-      AppBlockModule?.setBlockingEnabled?.(v)?.then?.(() => {
-        setBlockingEnabled(v);
+  const onPinSuccessWithPin = async (pin: string) => {
+    const action = pendingShieldPinActionRef.current;
+    if (action) {
+      try {
+        await action(pin);
+      } finally {
+        pendingShieldPinActionRef.current = null;
+      }
+    }
+  };
+
+  const executeWithPinForShield = (enabled: boolean) => {
+    const runShieldToggle = async (pin: string) => {
+      setIsShieldLoading(true);
+      try {
+        let result;
+        if (enabled) {
+          result = await activateShield(pin);
+        } else {
+          result = await deactivateShield(pin);
+        }
+        await refreshShieldStatus();
+        if (enabled && !result?.enabled) {
+          showToast({
+            kind: 'info',
+            title: 'Bloqueio indisponível',
+            message: 'Ative o serviço de acessibilidade para bloquear conteúdo.',
+          });
+          return;
+        }
         showToast({
           kind: 'success',
-          title: v ? 'Bloqueio de apps ativo' : 'Bloqueio de apps inativo',
+          title: enabled ? 'Escudo ativado' : 'Escudo pausado',
         });
-      })?.catch?.(() =>
-        showToast({kind: 'error', title: 'Falha ao alterar bloqueio'}),
-      );
+      } catch (error) {
+        console.error('[Config] Shield toggle failed', {enabled, error});
+        const msg = getShieldErrorMessage(error);
+        showToast({
+          kind: 'error',
+          title: enabled ? 'Não foi possível ativar o Escudo' : 'Não foi possível pausar o Escudo',
+          message: msg,
+        });
+      } finally {
+        setIsShieldLoading(false);
+      }
+    };
+
+    const doIt = async () => {
+      if (enabled && Platform.OS === 'android' && !accessibilityEnabled) {
+        showToast({
+          kind: 'warning',
+          title: 'Serviço de acessibilidade necessário',
+          message:
+            'Ative o Sentinela em Acessibilidade para bloquear sites e apps. Abrindo configurações...',
+        });
+        AppBlockModule?.openAccessibilitySettings?.();
+        return;
+      }
+      try {
+        const hasPin = await (NativeModules as any).SecurityModule?.hasSecurityPin?.();
+        if (!hasPin) {
+          await runShieldToggle('');
+          return;
+        }
+      } catch {
+        // Fallback to gate
+      }
+      pendingShieldPinActionRef.current = runShieldToggle;
+      setPinGateVisible(true);
+    };
+    if (isShieldLoading) {
+      return;
+    }
+    doIt();
+  };
+
+  const toggleBlocking = (_v: boolean) => {
+    showToast({
+      kind: 'info',
+      title: 'Bloqueio unificado',
+      message: 'O bloqueio de sites e apps segue o switch de Proteção acima.',
     });
   };
 
@@ -219,157 +296,18 @@ export default function ConfigScreen(): React.JSX.Element {
     });
   };
 
-  const isZeroIpAnswer = (value: string): boolean => {
-    const normalized = value.trim().toLowerCase();
-    return normalized === '0.0.0.0' || normalized === '::';
-  };
-
-  const validateDnsProtection = async (
-    profile: ReturnType<typeof getDnsProfile> & {dotHost: string; dohUrl?: string},
-  ): Promise<{ok: boolean; message: string}> => {
-    const blockedDomain =
-      getEnv('DNS_VALIDATION_BLOCKED_DOMAIN')?.trim() || 'pornhub.com';
-    if (!profile.dohUrl) {
-      return {
-        ok: false,
-        message: 'Perfil sem URL DoH para validação automática.',
-      };
-    }
-
-    const dohCheck = await resolveDomainWithDoh(profile.dohUrl, blockedDomain);
-    const blockedByDoh =
-      dohCheck.blocked || dohCheck.answers.some(answer => isZeroIpAnswer(answer));
-
-    let nextDnsCheck = false;
-    if (profile.provider === 'nextdns') {
-      try {
-        const response = await fetch('https://test.nextdns.io');
-        const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-        nextDnsCheck =
-          response.ok &&
-          Boolean(
-            payload &&
-              typeof payload === 'object' &&
-              (payload as {status?: string}).status === 'ok',
-          );
-      } catch {
-        nextDnsCheck = false;
-      }
-    } else {
-      nextDnsCheck = true;
-    }
-
-    if (blockedByDoh && nextDnsCheck) {
-      return {
-        ok: true,
-        message: 'Proteção validada com bloqueio de categoria e rota DNS ativa.',
-      };
-    }
-    return {
-      ok: false,
-      message:
-        'Configuração aplicada, mas validação incompleta. Verifique DNS Privado e política NextDNS.',
-    };
-  };
-
-  const applyDnsConfig = async () => {
-    const profile = getDnsProfile(selectedProfileId);
-    const dotHost = useCustom ? customDotHost.trim() : profile.dotHost;
-    const dohUrl = useCustom ? customDohUrl.trim() : profile.dohUrl ?? '';
-
-    if (!dotHost) {
-      showToast({kind: 'error', title: 'Host DoT obrigatório'});
-      return;
-    }
-
-    const syncedProfile = await syncDnsPolicyForChild(childId, {
-      ...profile,
-      dotHost,
-      dohUrl,
-    });
-
-    await setShieldProfile({
-      id: syncedProfile.id,
-      name: syncedProfile.name,
-      provider: syncedProfile.provider,
-      dotHost: syncedProfile.dotHost,
-      dohUrl: syncedProfile.dohUrl,
-      fallbackDnsIp: syncedProfile.fallbackDnsIp,
-    });
-    if (shieldStatus.enabled) {
-      await activateShield().catch(() => undefined);
-      await refreshShieldStatus();
-    }
-
-    // Sem VPN: abre configurações de DNS Privado e copia hostname para clipboard
-    await AppBlockModule?.copyToClipboard?.(dotHost)?.catch?.(() => undefined);
-    await VpnModule?.openPrivateDnsSettings?.();
-    setDnsValidationState('checking');
-    setDnsValidationMessage('Validando proteção...');
-    const validation = await validateDnsProtection(syncedProfile as typeof syncedProfile & {dotHost: string; dohUrl?: string});
-    await AsyncStorage.setItem(DNS_APPLIED_KEY, validation.ok ? '1' : '0');
-    setDnsProtectionApplied(validation.ok);
-    setDnsValidationState(validation.ok ? 'verified' : 'failed');
-    setDnsValidationMessage(validation.message);
-    showToast(
-      validation.ok
-        ? {
-            kind: 'success',
-            title: 'Proteção DNS validada',
-            message: `Host ${dotHost} ativo e filtrando categorias.`,
-          }
-        : {
-            kind: 'info',
-            title: 'DNS configurado',
-            message:
-              `Host ${dotHost} copiado, mas falta validação completa. Revise o DNS Privado nas configurações.`,
-          },
-    );
-    recordReviewSignal('dns_private_configured').catch(() => undefined);
-  };
-
-  const protectionActive = shieldStatus.enabled && shieldStatus.vpnActive;
+  const protectionActive = shieldStatus.enabled;
   const statusLabel = protectionActive ? 'Proteção Ativa' : 'Proteção Pausada';
 
-  const toggleShieldProtection = async (enabled: boolean) => {
-    if (isShieldLoading) {
-      return;
-    }
-    setIsShieldLoading(true);
-    try {
-      let result;
-      if (enabled) {
-        result = await activateShield();
-      } else {
-        result = await deactivateShield();
-      }
-      await refreshShieldStatus();
-      if (enabled && !result?.enabled) {
-        showToast({
-          kind: 'info',
-          title: 'Escudo indisponível neste dispositivo',
-          message: 'A proteção de rede nativa não está disponível neste sistema.',
-        });
-        return;
-      }
-      showToast({
-        kind: 'success',
-        title: enabled ? 'Escudo ativado' : 'Escudo pausado',
-      });
-    } catch (error) {
-      console.error('[Config] Shield toggle failed', {
-        enabled,
-        error,
-      });
-      showToast({
-        kind: 'error',
-        title: 'Não foi possível conectar ao Escudo',
-        message: getShieldErrorMessage(error),
-      });
-    } finally {
-      setIsShieldLoading(false);
-    }
-  };
+  const applyManualListChange = useCallback(async () => {
+    await syncBlacklistToShield();
+    await refreshShieldStatus();
+    getSyncStatus()
+      .then(s =>
+        setSyncStatus({lastSyncAt: s.lastSyncAt, totalBlocked: s.totalBlocked}),
+      )
+      .catch(() => undefined);
+  }, [refreshShieldStatus]);
 
   const addDomain = async (target: 'blacklist' | 'whitelist') => {
     if (!manualDomainInput.trim()) {
@@ -380,14 +318,45 @@ export default function ConfigScreen(): React.JSX.Element {
     setBlacklist(lists.blacklist);
     setWhitelist(lists.whitelist);
     setManualDomainInput('');
-    await syncBlacklistToShield();
+    await applyManualListChange();
   };
 
   const removeDomain = async (target: 'blacklist' | 'whitelist', domain: string) => {
     const lists = await removeDomainFromList(domain, target);
     setBlacklist(lists.blacklist);
     setWhitelist(lists.whitelist);
-    await syncBlacklistToShield();
+    await applyManualListChange();
+  };
+
+  const addKeywordToList = async () => {
+    if (!keywordInput.trim()) {
+      showToast({kind: 'info', title: 'Digite uma palavra-chave'});
+      return;
+    }
+    const lists = await addKeyword(keywordInput);
+    setKeywords(lists.keywords);
+    setKeywordInput('');
+    await applyManualListChange();
+  };
+
+  const removeKeywordFromList = async (kw: string) => {
+    const lists = await removeKeyword(kw);
+    setKeywords(lists.keywords);
+    await applyManualListChange();
+  };
+
+  const runManualSync = async () => {
+    setSyncing(true);
+    try {
+      const status = await syncBlacklist();
+      setSyncStatus({lastSyncAt: status.lastSyncAt, totalBlocked: status.totalBlocked});
+      await syncBlacklistToShield();
+      showToast({kind: 'success', title: 'Lista atualizada'});
+    } catch {
+      showToast({kind: 'error', title: 'Falha ao sincronizar'});
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -416,7 +385,7 @@ export default function ConfigScreen(): React.JSX.Element {
           </View>
           <Switch
             value={protectionActive}
-            onValueChange={toggleShieldProtection}
+            onValueChange={executeWithPinForShield}
             disabled={isShieldLoading}
             trackColor={{false: '#FCA5A5', true: '#67E8F9'}}
             thumbColor={protectionActive ? '#0EA5E9' : '#F97316'}
@@ -426,19 +395,13 @@ export default function ConfigScreen(): React.JSX.Element {
       </View>
 
       <View style={styles.tabs}>
-        {(['dns', 'apps', 'tasks', 'manual'] as const).map(t => (
+        {(['apps', 'tasks', 'manual'] as const).map(t => (
           <TouchableOpacity
             key={t}
             style={[styles.tab, tab === t && styles.tabActive]}
             onPress={() => setTab(t)}>
             <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'dns'
-                ? 'DNS'
-                : t === 'apps'
-                  ? 'Apps'
-                  : t === 'tasks'
-                    ? 'Tarefas'
-                    : 'Manual'}
+              {t === 'apps' ? 'Apps' : t === 'tasks' ? 'Tarefas' : 'Manual'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -448,37 +411,6 @@ export default function ConfigScreen(): React.JSX.Element {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        {tab === 'dns' && (
-          <>
-            <DnsToggle
-              dnsMode={dnsMode}
-              onDnsModeChange={setDnsMode}
-              selectedProfileId={selectedProfileId}
-              onSelectProfile={setSelectedProfileId}
-              dnsProtectionApplied={dnsProtectionApplied}
-              useCustom={useCustom}
-              onUseCustomChange={setUseCustom}
-              customDotHost={customDotHost}
-              onCustomDotHostChange={setCustomDotHost}
-              customDohUrl={customDohUrl}
-              onCustomDohUrlChange={setCustomDohUrl}
-              onApply={applyDnsConfig}
-            />
-            {dnsValidationState !== 'idle' && (
-              <View style={[styles.validationCard, dnsValidationState === 'verified' ? styles.validationCardOk : styles.validationCardWarn]}>
-                <Text style={[styles.validationTitle, dnsValidationState === 'verified' ? styles.validationTitleOk : styles.validationTitleWarn]}>
-                  {dnsValidationState === 'checking'
-                    ? 'Validando proteção...'
-                    : dnsValidationState === 'verified'
-                      ? 'Proteção confirmada'
-                      : 'Validação pendente'}
-                </Text>
-                <Text style={styles.validationDesc}>{dnsValidationMessage}</Text>
-              </View>
-            )}
-          </>
-        )}
-
         {tab === 'tasks' && (
           <View style={styles.section}>
             <Text style={styles.tasksSectionTitle}>Tarefas com recompensa</Text>
@@ -530,9 +462,28 @@ export default function ConfigScreen(): React.JSX.Element {
 
         {tab === 'manual' && (
           <View style={styles.section}>
+            <View style={styles.manualStatusCard}>
+              <Text style={styles.manualStatusTitle}>
+                Lista de proteção
+                {syncStatus.lastSyncAt
+                  ? ` atualizada há ${formatHoursAgo(syncStatus.lastSyncAt)}`
+                  : ' — sincronize para atualizar'}
+              </Text>
+              <Text style={styles.manualStatusCount}>
+                {syncStatus.totalBlocked.toLocaleString('pt-BR')} sites bloqueados
+              </Text>
+              <TouchableOpacity
+                style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
+                onPress={runManualSync}
+                disabled={syncing}>
+                <Text style={styles.syncBtnText}>
+                  {syncing ? 'Sincronizando...' : 'Sincronizar agora'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.tasksSectionTitle}>Bloqueio manual</Text>
             <Text style={styles.tasksSectionDesc}>
-              Adicione domínios específicos na lista negra ou branca.
+              Adicione domínios ou palavras-chave para bloquear.
             </Text>
             <View style={styles.manualInputWrap}>
               <TextInput
@@ -556,6 +507,22 @@ export default function ConfigScreen(): React.JSX.Element {
                   <Text style={styles.manualBtnText}>Adicionar à Lista Branca</Text>
                 </TouchableOpacity>
               </View>
+            </View>
+            <View style={styles.manualInputWrap}>
+              <TextInput
+                style={styles.taskModalInput}
+                placeholder="Ex: apostas, casino"
+                placeholderTextColor={Colors.textMuted}
+                value={keywordInput}
+                onChangeText={setKeywordInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.taskModalBtn, styles.manualBlacklistBtn]}
+                onPress={addKeywordToList}>
+                <Text style={styles.manualBtnText}>Adicionar palavra-chave</Text>
+              </TouchableOpacity>
             </View>
             <View style={styles.manualListCard}>
               <Text style={styles.manualListTitle}>Lista Negra</Text>
@@ -587,11 +554,29 @@ export default function ConfigScreen(): React.JSX.Element {
                 ))
               )}
             </View>
+            <View style={styles.manualListCard}>
+              <Text style={styles.manualListTitle}>Palavras-chave</Text>
+              {keywords.length === 0 ? (
+                <Text style={styles.tasksEmpty}>Sem palavras-chave adicionadas (usando padrão).</Text>
+              ) : (
+                keywords.map(kw => (
+                  <View key={`kw-${kw}`} style={styles.manualItemRow}>
+                    <Text style={styles.manualItemText}>{kw}</Text>
+                    <TouchableOpacity onPress={() => removeKeywordFromList(kw)}>
+                      <Text style={styles.manualRemoveText}>🗑</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
           </View>
         )}
 
         {tab === 'apps' && (
           <View style={styles.section}>
+            <Text style={styles.para}>
+              O bloqueio de sites e apps segue o switch de Proteção acima.
+            </Text>
             {accessibilityEnabled ? (
               <>
                 <View style={styles.row}>
@@ -615,6 +600,7 @@ export default function ConfigScreen(): React.JSX.Element {
                   blockingEnabled={blockingEnabled}
                   onToggleBlocking={toggleBlocking}
                   onToggleApp={toggleApp}
+                  blockingSwitchDisabled
                 />
               </>
             ) : (
@@ -695,8 +681,15 @@ export default function ConfigScreen(): React.JSX.Element {
 
       <PinGate
         visible={pinGateVisible}
-        onClose={() => setPinGateVisible(false)}
+        onClose={() => {
+          setPinGateVisible(false);
+          if (pendingShieldPinActionRef.current) {
+            setIsShieldLoading(false);
+            pendingShieldPinActionRef.current = null;
+          }
+        }}
         onSuccess={onPinSuccess}
+        onSuccessWithPin={onPinSuccessWithPin}
         title="Digite o PIN para continuar"
       />
     </View>
@@ -895,6 +888,34 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: 18,
   },
+  manualStatusCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  manualStatusTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  manualStatusCount: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: Spacing.md,
+  },
+  syncBtn: {
+    backgroundColor: Colors.primary,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+  },
+  syncBtnDisabled: { opacity: 0.6 },
+  syncBtnText: { color: Colors.white, fontWeight: '700' },
   manualInputWrap: {
     backgroundColor: Colors.surface,
     borderWidth: 1,

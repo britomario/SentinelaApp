@@ -1,7 +1,7 @@
 import React, {createContext, useCallback, useContext, useMemo, useRef, useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
-type ToastKind = 'success' | 'error' | 'info';
+type ToastKind = 'success' | 'error' | 'info' | 'warning';
 
 type ToastInput = {
   title: string;
@@ -48,7 +48,7 @@ export function ToastProvider({children}: {children: React.ReactNode}): React.JS
             key={toast.id}
             activeOpacity={0.9}
             onPress={() => setQueue(prev => prev.filter(t => t.id !== toast.id))}
-            style={[styles.toast, toast.kind === 'success' && styles.success, toast.kind === 'error' && styles.error]}>
+            style={[styles.toast, toast.kind === 'success' && styles.success, toast.kind === 'error' && styles.error, toast.kind === 'warning' && styles.warning]}>
             <Text style={styles.title}>{toast.title}</Text>
             {!!toast.message && <Text style={styles.message}>{toast.message}</Text>}
           </TouchableOpacity>
@@ -87,6 +87,9 @@ const styles = StyleSheet.create({
   },
   error: {
     borderLeftColor: '#F87171',
+  },
+  warning: {
+    borderLeftColor: '#FBBF24',
   },
   title: {
     color: '#FFFFFF',

@@ -15,6 +15,7 @@ import {useNavigation} from '@react-navigation/native';
 
 import GuidedTourOverlay from '../../components/tour/GuidedTourOverlay';
 import type {TourAnchor} from '../../components/tour/GuidedTourOverlay';
+import PinGate from '../../components/security/PinGate';
 import Skeleton from '../../components/feedback/Skeleton';
 import {useToast} from '../../components/feedback/ToastProvider';
 import {useReviewPrompt} from '../../components/feedback/ReviewPromptProvider';
@@ -67,6 +68,8 @@ export default function DashboardScreen(): React.JSX.Element {
   const [tourStep, setTourStep] = useState(0);
   const [tourAnchors, setTourAnchors] = useState<Record<string, TourAnchor>>({});
   const [isShieldLoading, setIsShieldLoading] = useState(false);
+  const [pinGateVisible, setPinGateVisible] = useState(false);
+  const pendingShieldPinActionRef = React.useRef<((pin: string) => Promise<void>) | null>(null);
   const [childLocation, setChildLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -147,7 +150,7 @@ export default function DashboardScreen(): React.JSX.Element {
 
   const maxUsage = Math.max(1, ...usageWeek.map(d => d.minutes));
   const climateEmoji = climate.wellbeing.level === 'green' ? '😊' : '🙂';
-  const shieldActive = shieldStatus.enabled && shieldStatus.vpnActive;
+  const shieldActive = shieldStatus.enabled;
 
   useEffect(() => {
     if (isLoading) {
@@ -247,38 +250,64 @@ export default function DashboardScreen(): React.JSX.Element {
     loadUsage().catch(() => undefined);
   }, []);
 
-  const onToggleShield = async (enabled: boolean) => {
+  const executeWithPinForShield = (enabled: boolean) => {
+    const runShieldToggle = async (pin: string) => {
+      setIsShieldLoading(true);
+      try {
+        const result = await toggleShield(enabled, pin);
+        await refreshShieldStatus();
+        if (enabled && !result.enabled) {
+          showToast({
+            kind: 'info',
+            title: 'Bloqueio indisponível',
+            message: 'Ative o serviço de acessibilidade para bloquear conteúdo.',
+          });
+          return;
+        }
+        showToast({
+          kind: 'success',
+          title: enabled ? 'Escudo ativo' : 'Proteção pausada',
+        });
+      } catch (error) {
+        console.error('[Dashboard] Shield toggle failed', {enabled, error});
+        const msg = getShieldErrorMessage(error);
+        showToast({
+          kind: 'error',
+          title: enabled ? 'Não foi possível ativar o Escudo' : 'Não foi possível pausar o Escudo',
+          message: msg,
+        });
+      } finally {
+        setIsShieldLoading(false);
+      }
+    };
+
+    const doIt = async () => {
+      try {
+        const hasPin = await (NativeModules as any).SecurityModule?.hasSecurityPin?.();
+        if (!hasPin) {
+          await runShieldToggle('');
+          return;
+        }
+      } catch {
+        // Fallback to gate
+      }
+      pendingShieldPinActionRef.current = runShieldToggle;
+      setPinGateVisible(true);
+    };
     if (isShieldLoading) {
       return;
     }
-    setIsShieldLoading(true);
-    try {
-      const result = await toggleShield(enabled);
-      await refreshShieldStatus();
-      if (enabled && !result.enabled) {
-        showToast({
-          kind: 'info',
-          title: 'Escudo não suportado',
-          message: 'Este dispositivo ainda não possui ativação nativa disponível.',
-        });
-        return;
+    doIt();
+  };
+
+  const onPinSuccessWithPin = async (pin: string) => {
+    const action = pendingShieldPinActionRef.current;
+    if (action) {
+      try {
+        await action(pin);
+      } finally {
+        pendingShieldPinActionRef.current = null;
       }
-      showToast({
-        kind: 'success',
-        title: enabled ? 'Escudo ativo' : 'Proteção pausada',
-      });
-    } catch (error) {
-      console.error('[Dashboard] Shield toggle failed', {
-        enabled,
-        error,
-      });
-      showToast({
-        kind: 'error',
-        title: 'Não foi possível conectar ao Escudo',
-        message: getShieldErrorMessage(error),
-      });
-    } finally {
-      setIsShieldLoading(false);
     }
   };
 
@@ -327,7 +356,7 @@ export default function DashboardScreen(): React.JSX.Element {
           <View style={styles.headerActions}>
             <Switch
               value={shieldActive}
-              onValueChange={onToggleShield}
+              onValueChange={executeWithPinForShield}
               disabled={isShieldLoading}
               trackColor={{false: '#FCA5A5', true: '#86EFAC'}}
               thumbColor={shieldActive ? '#16A34A' : '#F97316'}
@@ -350,8 +379,8 @@ export default function DashboardScreen(): React.JSX.Element {
             <Text style={styles.cardTitle}>Escudo Principal</Text>
             <Text style={styles.cardDesc}>
               {shieldActive
-                ? 'Tráfego protegido por DNS filtrado e bloqueio em tempo real.'
-                : 'Ative o escudo para forçar proteção de rede e bloquear conteúdo sensível.'}
+                ? 'Proteção ativa: bloqueio local de sites e palavras-chave em navegadores.'
+                : 'Ative o escudo para bloquear conteúdo sensível em navegadores.'}
             </Text>
           </View>
         </View>
@@ -470,6 +499,19 @@ export default function DashboardScreen(): React.JSX.Element {
         </View>
 
       </ScrollView>
+      <PinGate
+        visible={pinGateVisible}
+        onClose={() => {
+          setPinGateVisible(false);
+          if (pendingShieldPinActionRef.current) {
+            setIsShieldLoading(false);
+            pendingShieldPinActionRef.current = null;
+          }
+        }}
+        onSuccess={() => {}}
+        onSuccessWithPin={onPinSuccessWithPin}
+        title="Digite o PIN para continuar"
+      />
     </View>
   );
 }

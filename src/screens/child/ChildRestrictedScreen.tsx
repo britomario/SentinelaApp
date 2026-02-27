@@ -1,88 +1,90 @@
-import React, {useState} from 'react';
-import {
-  Modal,
-  NativeModules,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, {useCallback, useEffect, useState} from 'react';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {useNavigation} from '@react-navigation/native';
 import {useToast} from '../../components/feedback/ToastProvider';
 
-const {SecurityModule} = NativeModules as {
-  SecurityModule?: {
-    validateSecurityPin?: (pin: string) => Promise<boolean>;
-  };
-};
+import PinGate from '../../components/security/PinGate';
+import {isRestricted, setRestricted} from '../../services/restrictedModeService';
 
 export default function ChildRestrictedScreen(): React.JSX.Element {
+  const navigation = useNavigation<any>();
   const {showToast} = useToast();
-  const [pin, setPin] = useState('');
-  const [unlocked, setUnlocked] = useState(false);
+  const [restricted, setRestrictedState] = useState(true);
+  const [pinGateVisible, setPinGateVisible] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  const validate = async () => {
-    try {
-      const ok = await SecurityModule?.validateSecurityPin?.(pin);
-      if (!ok) {
-        showToast({
-          kind: 'error',
-          title: 'PIN invalido',
-          message: 'Somente o responsavel pode liberar configuracoes sensiveis.',
-        });
-        return;
-      }
-      setUnlocked(true);
-      showToast({
-        kind: 'success',
-        title: 'Acesso autorizado',
-        message: 'Sessao liberada para manutencao supervisionada.',
-      });
-      setPin('');
-    } catch {
-      showToast({
-        kind: 'error',
-        title: 'Falha de validacao',
-      });
-    }
+  const loadState = useCallback(async () => {
+    const value = await isRestricted();
+    setRestrictedState(value);
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    loadState();
+  }, [loadState]);
+
+  const handleUnlock = async (_pin: string) => {
+    await setRestricted(false);
+    setRestrictedState(false);
+    setPinGateVisible(false);
+    showToast({
+      kind: 'success',
+      title: 'Acesso autorizado',
+      message: 'Sessão liberada para manutenção supervisionada.',
+    });
   };
+
+  const handleReativar = async () => {
+    await setRestricted(true);
+    setRestrictedState(true);
+    showToast({kind: 'success', title: 'Modo restrito reativado'});
+  };
+
+  if (!ready) {
+    return <></>;
+  }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Voce esta protegido pelo Sentinela</Text>
-      <Text style={styles.subtitle}>
-        Este dispositivo esta em modo monitorado. Alteracoes de seguranca exigem PIN mestre do responsavel.
+      <Text style={styles.title}>
+        {restricted ? 'Você está protegido pelo Sentinela' : 'Modo restrito desativado'}
       </Text>
-      <TouchableOpacity style={styles.lockBtn} onPress={() => setUnlocked(false)}>
-        <Text style={styles.lockBtnText}>Manter modo restrito ativo</Text>
-      </TouchableOpacity>
+      <Text style={styles.subtitle}>
+        {restricted
+          ? 'Modo restrito impede alterações em ajustes e proteções sem o PIN do responsável. Para liberar o acesso às configurações, digite o PIN mestre.'
+          : 'O acesso às configurações está liberado. Toque abaixo para reativar a proteção.'}
+      </Text>
 
-      <Modal transparent visible={!unlocked} animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Acesso restrito</Text>
-            <Text style={styles.modalText}>
-              Digite o PIN mestre para abrir configuracoes ou remover protecoes.
-            </Text>
-            <TextInput
-              style={styles.input}
-              placeholder="PIN mestre"
-              placeholderTextColor="#64748B"
-              secureTextEntry
-              keyboardType="number-pad"
-              maxLength={4}
-              value={pin}
-              onChangeText={setPin}
-            />
-            <TouchableOpacity
-              style={[styles.actionBtn, pin.length !== 4 && styles.actionBtnDisabled]}
-              disabled={pin.length !== 4}
-              onPress={validate}>
-              <Text style={styles.actionBtnText}>Validar autorizacao</Text>
-            </TouchableOpacity>
-          </View>
+      {restricted ? (
+        <TouchableOpacity
+          style={styles.lockBtn}
+          onPress={() => setPinGateVisible(true)}>
+          <Text style={styles.lockBtnText}>Desbloquear com PIN</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.reactivarBox}>
+          <Text style={styles.reactivarTitle}>Reativar modo restrito</Text>
+          <Text style={styles.reactivarText}>
+            O responsável pode configurar o dispositivo. Toque abaixo para voltar à proteção.
+          </Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleReativar}>
+            <Text style={styles.primaryBtnText}>Reativar modo restrito</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            onPress={() => navigation.navigate('Config')}>
+            <Text style={styles.secondaryBtnText}>Voltar aos ajustes</Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
+      )}
+
+      <PinGate
+        visible={pinGateVisible}
+        onClose={() => setPinGateVisible(false)}
+        onSuccess={() => {}}
+        onSuccessWithPin={handleUnlock}
+        title="Digite o PIN mestre para liberar configurações"
+      />
     </View>
   );
 }
@@ -114,30 +116,41 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   lockBtnText: {color: '#93C5FD', textAlign: 'center', fontWeight: '700'},
-  overlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(2,6,23,0.82)',
-    padding: 20,
-  },
-  modal: {width: '100%', backgroundColor: '#111827', borderRadius: 16, padding: 20},
-  modalTitle: {color: '#E2E8F0', fontWeight: '800', fontSize: 20},
-  modalText: {marginTop: 8, color: '#94A3B8', lineHeight: 19},
-  input: {
-    marginTop: 14,
+  reactivarBox: {
+    marginTop: 24,
     backgroundColor: '#1E293B',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#F8FAFC',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
-  actionBtn: {
-    marginTop: 14,
+  reactivarTitle: {
+    color: '#E2E8F0',
+    fontWeight: '800',
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  reactivarText: {
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 20,
+  },
+  primaryBtn: {
+    marginTop: 18,
     backgroundColor: '#0066CC',
     borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
-  actionBtnDisabled: {opacity: 0.5},
-  actionBtnText: {color: '#FFFFFF', textAlign: 'center', fontWeight: '700'},
+  primaryBtnText: {color: '#FFFFFF', fontWeight: '700', fontSize: 16},
+  secondaryBtn: {
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  secondaryBtnText: {color: '#93C5FD', textAlign: 'center', fontWeight: '600'},
 });

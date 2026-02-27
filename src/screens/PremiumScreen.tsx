@@ -94,7 +94,7 @@ export default function PremiumScreen(): React.JSX.Element {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Premium+</Text>
+      <Text style={styles.title}>Premium</Text>
       <Text style={styles.subtitle}>
         Desbloqueie IA avançada, políticas de DNS reforçadas e proteção parental contínua.
       </Text>
